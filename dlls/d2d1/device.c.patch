@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..397edaa8b35 100644
+index 552d6d4c24c..d3278df6398 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -25,7 +25,7 @@ index 552d6d4c24c..397edaa8b35 100644
          for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
          {
              ID3D11VertexShader_Release(context->shape_resources[i].vs);
-@@ -1281,6 +1290,745 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
+@@ -1281,6 +1290,796 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
      }
  }
  
@@ -282,6 +282,9 @@ index 552d6d4c24c..397edaa8b35 100644
 +static HRESULT d2d_effect_render_node(struct d2d_device_context *context, struct d2d_effect *effect,
 +        struct d2d_transform_node *node, const D2D1_RECT_L *requested_rect, unsigned int depth,
 +        struct d2d_bitmap **out, D2D1_RECT_L *out_rect);
++static HRESULT d2d_effect_run_graph(struct d2d_device_context *context, struct d2d_effect *effect,
++        const D2D1_RECT_L *requested, unsigned int depth, struct d2d_bitmap **out,
++        D2D1_RECT_L *out_rect);
 +
 +/* Resolve one input slot of a node. The slot is either fed by another node,
 + * which is rendered first, or wired to one of the effect's own inputs. */
@@ -356,10 +359,11 @@ index 552d6d4c24c..397edaa8b35 100644
 +    ID3D11DeviceContext1 *d3d_context;
 +    struct d2d_bitmap *target = NULL;
 +    ID2D1Transform *transform = NULL;
++    ID2D1Effect *nested;
 +    ID3D11PixelShader *ps = NULL;
 +    ID3D11InputLayout *il = NULL;
 +    ID3D11VertexShader *vs = NULL;
-+    D2D1_RECT_L opaque_out, rect;
++    D2D1_RECT_L opaque_out, rect, mapped;
 +    D3D11_BUFFER_DESC buffer_desc;
 +    unsigned int i, stride, offset;
 +    D3D11_VIEWPORT vp;
@@ -437,6 +441,10 @@ index 552d6d4c24c..397edaa8b35 100644
 +        rect = input_rects[0];
 +    }
 +
++    /* Keep the unclipped mapping; the pass-through case below needs to know
++     * how the transform moved the region, which clipping would obscure. */
++    mapped = rect;
++
 +    /* A transform whose output is conceptually unbounded reports a rect
 +     * covering the whole logical plane. Clipping to the region that was asked
 +     * for keeps the intermediate to a size that can actually be allocated,
@@ -459,6 +467,30 @@ index 552d6d4c24c..397edaa8b35 100644
 +
 +    *out_rect = rect;
 +
++    /* A node standing in for a nested effect: feed it the inputs resolved
++     * here and evaluate its own graph. */
++    if ((nested = d2d_transform_node_get_effect(node->object)))
++    {
++        struct d2d_effect *nested_impl = unsafe_impl_from_ID2D1Effect(nested);
++
++        if (!nested_impl)
++        {
++            FIXME("Nested effect %p is not implemented here.\n", nested);
++            hr = E_NOTIMPL;
++            goto done;
++        }
++
++        for (i = 0; i < node->input_count; ++i)
++        {
++            if (inputs[i])
++                ID2D1Effect_SetInput(nested, i,
++                        (ID2D1Image *)&inputs[i]->ID2D1Bitmap1_iface, TRUE);
++        }
++
++        hr = d2d_effect_run_graph(context, nested_impl, &rect, depth + 1, out, out_rect);
++        goto done;
++    }
++
 +    /* Nodes without a pixel shader are not draw transforms: offset, border
 +     * and bounds adjustment transforms only move or extend rectangles, which
 +     * the rect mapping above has already accounted for, so the input image
@@ -469,8 +501,20 @@ index 552d6d4c24c..397edaa8b35 100644
 +        {
 +            *out = inputs[0];
 +            ID2D1Bitmap1_AddRef(&(*out)->ID2D1Bitmap1_iface);
-+            /* The pixels are the input's, so report the input's extent. */
-+            *out_rect = input_rects[0];
++
++            /* Report the rect the pixels actually cover. A transform that
++             * only translates the region -- an offset transform -- moves
++             * them, so the mapped rect describes where they now are. One that
++             * grows the region -- a border transform -- leaves the pixels
++             * where they were: reporting the larger rect would stretch them
++             * across it, whereas reporting the input's extent lets the
++             * clamping sampler extend the edges, which is what the transform
++             * is asking for. */
++            if (d2d_rect_l_width(&mapped) == d2d_rect_l_width(&input_rects[0])
++                    && d2d_rect_l_height(&mapped) == d2d_rect_l_height(&input_rects[0]))
++                *out_rect = mapped;
++            else
++                *out_rect = input_rects[0];
 +            hr = S_OK;
 +        }
 +        else
@@ -641,9 +685,16 @@ index 552d6d4c24c..397edaa8b35 100644
 +/* Evaluate an effect's transform graph, returning the rendered result and the
 + * rect it covers in the effect's coordinate space. */
 +static HRESULT d2d_effect_run_graph(struct d2d_device_context *context, struct d2d_effect *effect,
-+        const D2D1_RECT_L *requested, struct d2d_bitmap **out, D2D1_RECT_L *out_rect)
++        const D2D1_RECT_L *requested, unsigned int depth, struct d2d_bitmap **out,
++        D2D1_RECT_L *out_rect)
 +{
 +    HRESULT hr;
++
++    if (depth > D2D_EFFECT_MAX_GRAPH_DEPTH)
++    {
++        WARN("Effects are nested too deeply.\n");
++        return E_FAIL;
++    }
 +
 +    if (!effect->graph || !effect->graph->output)
 +        return E_FAIL;
@@ -662,7 +713,7 @@ index 552d6d4c24c..397edaa8b35 100644
 +        return hr;
 +    }
 +
-+    return d2d_effect_render_node(context, effect, effect->graph->output, requested, 0,
++    return d2d_effect_render_node(context, effect, effect->graph->output, requested, depth,
 +            out, out_rect);
 +}
 +
@@ -710,7 +761,7 @@ index 552d6d4c24c..397edaa8b35 100644
 +                requested.bottom = ceilf(hint->bottom);
 +        }
 +
-+        if (FAILED(d2d_effect_run_graph(context, effect_impl, &requested, &result, &result_rect)))
++        if (FAILED(d2d_effect_run_graph(context, effect_impl, &requested, 0, &result, &result_rect)))
 +            goto fallback;
 +
 +
@@ -771,7 +822,7 @@ index 552d6d4c24c..397edaa8b35 100644
  static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
          const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
          ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
-@@ -2199,13 +2947,327 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
+@@ -2199,13 +2998,327 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
      return hr;
  }
  
@@ -1101,7 +1152,7 @@ index 552d6d4c24c..397edaa8b35 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilename(ID2D1DeviceContext6 *iface,
-@@ -2219,8 +3281,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
+@@ -2219,8 +3332,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromWicColorContext(ID2D1DeviceContext6 *iface,
          IWICColorContext *wic_color_context, ID2D1ColorContext **color_context)
  {
@@ -1112,7 +1163,7 @@ index 552d6d4c24c..397edaa8b35 100644
 +    UINT size;
 +    BYTE *pbBuffer;
 +    UINT exif_color;
-+
+ 
 +    TRACE("iface %p, wic_color_context %p, color_context %p!\n", iface, wic_color_context, color_context);
 +
 +    IWICColorContext_GetType(wic_color_context, &type);
@@ -1139,7 +1190,7 @@ index 552d6d4c24c..397edaa8b35 100644
 +        else if (exif_color == 2)
 +            return d2d_color_context_create((ID2D1ColorContext1**) color_context, context->factory, D2D1_COLOR_SPACE_CUSTOM,
 +                ADOBE_RGB_ICC_COLOR_PROFILE, sizeof(ADOBE_RGB_ICC_COLOR_PROFILE));
- 
++
 +        FIXME("Unknown exif color type %u", exif_color);
 +        return E_NOTIMPL;
 +    }
@@ -1148,7 +1199,7 @@ index 552d6d4c24c..397edaa8b35 100644
      return E_NOTIMPL;
  }
  
-@@ -2330,7 +3429,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
+@@ -2330,7 +3480,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
              iface, stops, stop_count, preinterpolation_space, postinterpolation_space,
              buffer_precision, extend_mode, color_interpolation_mode, gradient);
  
@@ -1157,7 +1208,7 @@ index 552d6d4c24c..397edaa8b35 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1DeviceContext6 *iface,
-@@ -2387,6 +3486,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
+@@ -2387,6 +3537,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
  {
      FIXME("iface %p, format %#x stub!\n", iface, format);
  
@@ -1165,7 +1216,7 @@ index 552d6d4c24c..397edaa8b35 100644
      return FALSE;
  }
  
-@@ -2427,6 +3527,11 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2427,6 +3578,11 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
      D2D_SIZE_U pixel_size;
      ID2D1Bitmap *bitmap;
      D2D_SIZE_F size;
@@ -1177,7 +1228,7 @@ index 552d6d4c24c..397edaa8b35 100644
  
      TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
  
-@@ -2456,7 +3561,37 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2456,7 +3612,37 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
  
          return S_OK;
      }
@@ -1216,7 +1267,7 @@ index 552d6d4c24c..397edaa8b35 100644
      {
          FIXME("Unable to get local bounds of image %p.\n", image);
  
-@@ -2719,6 +3854,8 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2719,6 +3905,8 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
      ID2D1Bitmap *bitmap;
@@ -1225,7 +1276,7 @@ index 552d6d4c24c..397edaa8b35 100644
  
      TRACE("iface %p, image %p, target_offset %s, image_rect %s, interpolation_mode %#x, composite_mode %#x.\n",
              iface, image, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
-@@ -2750,6 +3887,20 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2750,6 +3938,20 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          ID2D1Bitmap_Release(bitmap);
          return;
      }
@@ -1246,7 +1297,7 @@ index 552d6d4c24c..397edaa8b35 100644
  
      FIXME("Unhandled image %p.\n", image);
  }
-@@ -4253,7 +5404,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4253,7 +5455,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          { 1.0f, -1.0f},
      };
      static const UINT16 indices[] = {0, 1, 2, 2, 1, 3};
@@ -1255,7 +1306,7 @@ index 552d6d4c24c..397edaa8b35 100644
  
      render_target->ID2D1DeviceContext6_iface.lpVtbl = &d2d_device_context_vtbl;
      render_target->ID2D1GdiInteropRenderTarget_iface.lpVtbl = &d2d_gdi_interop_render_target_vtbl;
-@@ -4278,6 +5429,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4278,6 +5480,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          goto err;
      }
  
