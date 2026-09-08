@@ -1,8 +1,56 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index d406fecca18..7125ef7f7ae 100644
+index d406fecca18..cdf27851127 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
-@@ -16577,7 +16577,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -5857,7 +5857,6 @@ static void test_shared_bitmap(BOOL d3d11)
+ 
+     refcount = get_refcount(wic_lock);
+     hr = ID2D1DeviceContext_CreateSharedBitmap(sw_device_context, &IID_IWICBitmapLock, wic_lock, NULL, &bitmap1);
+-    todo_wine
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+     todo_wine
+     ok(get_refcount(wic_lock) > refcount, "Unexpected refcount.\n");
+@@ -10890,7 +10889,6 @@ static void test_command_list(BOOL d3d11)
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+ 
+     hr = ID2D1CommandList_Close(command_list);
+-    todo_wine
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+ 
+     ID2D1CommandList_Release(command_list);
+@@ -13483,7 +13481,6 @@ static void test_effect_2d_affine(BOOL d3d11)
+         ID2D1Effect_GetOutput(effect, &output);
+ 
+         hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
+-        todo_wine
+         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+         todo_wine
+         ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 1),
+@@ -13622,7 +13619,6 @@ static void test_effect_crop(BOOL d3d11)
+ 
+         set_rect(&output_bounds, -1.0f, -1.0f, -1.0f, -1.0f);
+         hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
+-        todo_wine
+         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+         todo_wine
+         ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 0),
+@@ -14078,7 +14074,6 @@ static void test_effect_flood(BOOL d3d11)
+     ID2D1Effect_GetOutput(effect, &output);
+ 
+     hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
+-    todo_wine
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+     todo_wine
+     ok(compare_rect(&bounds, -bound, -bound, bound, bound, 0),
+@@ -14968,7 +14963,6 @@ static void test_border_transform(BOOL d3d11)
+     todo_wine
+     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
+     hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
+-    todo_wine
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+ 
+     /* Set extend mode */
+@@ -16577,7 +16571,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      get_surface_readback(&ctx, &rb);
      colour = get_readback_colour(&rb, 0, 0);
      expected_colour = 0x661a334c;
