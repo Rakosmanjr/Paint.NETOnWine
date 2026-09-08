@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..c13d20d8625 100644
+index 552d6d4c24c..397edaa8b35 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -25,7 +25,7 @@ index 552d6d4c24c..c13d20d8625 100644
          for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
          {
              ID3D11VertexShader_Release(context->shape_resources[i].vs);
-@@ -1281,6 +1290,740 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
+@@ -1281,6 +1290,745 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
      }
  }
  
@@ -68,10 +68,15 @@ index 552d6d4c24c..c13d20d8625 100644
 +     * values -- which shows up as a flat colour rather than a failure. */
 +    coord_count = input_count ? input_count : 1;
 +
-+    p += sprintf(p, "struct output\n{\n    float4 scene : SCENE_POSITION;\n");
++    /* Declared in the order the pixel shaders expect: SV_POSITION,
++     * SCENE_POSITION, then one TEXCOORD per input. Output registers are
++     * assigned in declaration order, and the shaders are linked by register,
++     * so a different order silently feeds each semantic the wrong value. */
++    p += sprintf(p, "struct output\n{\n    float4 position : SV_POSITION;\n");
++    p += sprintf(p, "    float4 scene : SCENE_POSITION;\n");
 +    for (i = 0; i < coord_count; ++i)
 +        p += sprintf(p, "    float4 uv%u : TEXCOORD%u;\n", i, i);
-+    p += sprintf(p, "    float4 position : SV_POSITION;\n};\n\n");
++    p += sprintf(p, "};\n\n");
 +    p += sprintf(p, "void main(float4 position : POSITION, float4 scene : SCENE_POSITION");
 +    for (i = 0; i < coord_count; ++i)
 +        p += sprintf(p, ",\n        float4 iuv%u : TEXCOORD%u", i, i);
@@ -766,7 +771,7 @@ index 552d6d4c24c..c13d20d8625 100644
  static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
          const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
          ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
-@@ -2199,13 +2942,327 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
+@@ -2199,13 +2947,327 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
      return hr;
  }
  
@@ -1096,7 +1101,7 @@ index 552d6d4c24c..c13d20d8625 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilename(ID2D1DeviceContext6 *iface,
-@@ -2219,8 +3276,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
+@@ -2219,8 +3281,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromWicColorContext(ID2D1DeviceContext6 *iface,
          IWICColorContext *wic_color_context, ID2D1ColorContext **color_context)
  {
@@ -1117,7 +1122,7 @@ index 552d6d4c24c..c13d20d8625 100644
 +    {
 +        if (FAILED(hr = IWICColorContext_GetProfileBytes(wic_color_context, 0, NULL, &size)))
 +            return hr;
- 
++
 +        if (!(pbBuffer = calloc(1, size)))
 +            return E_OUTOFMEMORY;
 +
@@ -1134,7 +1139,7 @@ index 552d6d4c24c..c13d20d8625 100644
 +        else if (exif_color == 2)
 +            return d2d_color_context_create((ID2D1ColorContext1**) color_context, context->factory, D2D1_COLOR_SPACE_CUSTOM,
 +                ADOBE_RGB_ICC_COLOR_PROFILE, sizeof(ADOBE_RGB_ICC_COLOR_PROFILE));
-+
+ 
 +        FIXME("Unknown exif color type %u", exif_color);
 +        return E_NOTIMPL;
 +    }
@@ -1143,7 +1148,7 @@ index 552d6d4c24c..c13d20d8625 100644
      return E_NOTIMPL;
  }
  
-@@ -2330,7 +3424,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
+@@ -2330,7 +3429,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
              iface, stops, stop_count, preinterpolation_space, postinterpolation_space,
              buffer_precision, extend_mode, color_interpolation_mode, gradient);
  
@@ -1152,7 +1157,7 @@ index 552d6d4c24c..c13d20d8625 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1DeviceContext6 *iface,
-@@ -2387,6 +3481,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
+@@ -2387,6 +3486,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
  {
      FIXME("iface %p, format %#x stub!\n", iface, format);
  
@@ -1160,7 +1165,7 @@ index 552d6d4c24c..c13d20d8625 100644
      return FALSE;
  }
  
-@@ -2427,6 +3522,11 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2427,6 +3527,11 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
      D2D_SIZE_U pixel_size;
      ID2D1Bitmap *bitmap;
      D2D_SIZE_F size;
@@ -1172,7 +1177,7 @@ index 552d6d4c24c..c13d20d8625 100644
  
      TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
  
-@@ -2456,7 +3556,37 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2456,7 +3561,37 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
  
          return S_OK;
      }
@@ -1211,7 +1216,7 @@ index 552d6d4c24c..c13d20d8625 100644
      {
          FIXME("Unable to get local bounds of image %p.\n", image);
  
-@@ -2719,6 +3849,8 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2719,6 +3854,8 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
      ID2D1Bitmap *bitmap;
@@ -1220,7 +1225,7 @@ index 552d6d4c24c..c13d20d8625 100644
  
      TRACE("iface %p, image %p, target_offset %s, image_rect %s, interpolation_mode %#x, composite_mode %#x.\n",
              iface, image, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
-@@ -2750,6 +3882,20 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2750,6 +3887,20 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          ID2D1Bitmap_Release(bitmap);
          return;
      }
@@ -1241,3 +1246,27 @@ index 552d6d4c24c..c13d20d8625 100644
  
      FIXME("Unhandled image %p.\n", image);
  }
+@@ -4253,7 +5404,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+         { 1.0f, -1.0f},
+     };
+     static const UINT16 indices[] = {0, 1, 2, 2, 1, 3};
+-    static const D3D_FEATURE_LEVEL feature_levels = D3D_FEATURE_LEVEL_10_0;
++    D3D_FEATURE_LEVEL feature_levels;
+ 
+     render_target->ID2D1DeviceContext6_iface.lpVtbl = &d2d_device_context_vtbl;
+     render_target->ID2D1GdiInteropRenderTarget_iface.lpVtbl = &d2d_gdi_interop_render_target_vtbl;
+@@ -4278,6 +5429,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+         goto err;
+     }
+ 
++    /* Use the device's own feature level rather than a fixed 10_0. A custom
++     * effect supplies its own pixel shader, which may target a higher shader
++     * model than the context state allows; such a shader does not take effect
++     * when bound, and the draw silently produces the wrong result. */
++    feature_levels = ID3D11Device1_GetFeatureLevel(render_target->d3d_device);
++    if (feature_levels < D3D_FEATURE_LEVEL_10_0)
++        feature_levels = D3D_FEATURE_LEVEL_10_0;
++
+     if (FAILED(hr = ID3D11Device1_CreateDeviceContextState(render_target->d3d_device,
+             0, &feature_levels, 1, D3D11_SDK_VERSION, &IID_ID3D11Device1, NULL,
+             &render_target->d3d_state)))
