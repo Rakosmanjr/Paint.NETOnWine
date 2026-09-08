@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index 286fae95e9c..92708c21d2b 100644
+index 286fae95e9c..b4e20e67fe5 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,7 @@
@@ -223,7 +223,18 @@ index 286fae95e9c..92708c21d2b 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateBlendTransform(ID2D1EffectContext *iface,
-@@ -3259,7 +3407,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
+@@ -3249,7 +3397,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
+     TRACE("iface %p refcount %lu.\n", iface, refcount);
+ 
+     if (!refcount)
++    {
++        free(render_info->ps_cb);
+         free(render_info);
++    }
+ 
+     return refcount;
+ }
+@@ -3259,7 +3410,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
  {
      FIXME("iface %p, index %u stub.\n", iface, index);
  
@@ -232,7 +243,7 @@ index 286fae95e9c..92708c21d2b 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *iface,
-@@ -3267,7 +3415,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
+@@ -3267,7 +3418,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
  {
      FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
  
@@ -241,7 +252,40 @@ index 286fae95e9c..92708c21d2b 100644
  }
  
  static void STDMETHODCALLTYPE d2d_draw_info_SetCached(ID2D1DrawInfo *iface, BOOL is_cached)
-@@ -3410,7 +3558,7 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3284,9 +3435,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
+ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetPixelShaderConstantBuffer(ID2D1DrawInfo *iface,
+         const BYTE *buffer, UINT32 size)
+ {
+-    FIXME("iface %p, buffer %p, size %u stub.\n", iface, buffer, size);
++    struct d2d_render_info *render_info = impl_from_ID2D1DrawInfo(iface);
++    BYTE *data;
+ 
+-    return E_NOTIMPL;
++    TRACE("iface %p, buffer %p, size %u.\n", iface, buffer, size);
++
++    /* The caller owns the buffer and is free to reuse it once this returns,
++     * so keep our own copy rather than the pointer. */
++    if (size)
++    {
++        if (!(data = malloc(size)))
++            return E_OUTOFMEMORY;
++        memcpy(data, buffer, size);
++    }
++    else
++    {
++        data = NULL;
++    }
++
++    free(render_info->ps_cb);
++    render_info->ps_cb = data;
++    render_info->ps_cb_size = size;
++    render_info->mask |= D2D_RENDER_INFO_PS_CONSTANT_BUFFER;
++
++    return S_OK;
+ }
+ 
+ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
+@@ -3410,13 +3582,24 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          else
          {
              FIXME("Unsupported node %p.\n", node);
@@ -250,7 +294,24 @@ index 286fae95e9c..92708c21d2b 100644
          }
      }
  
-@@ -3426,11 +3574,98 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+     return S_OK;
+ }
+ 
++/* Unlike the other unsafe_impl_from_* helpers this does not assert on a
++ * foreign object: an application is free to implement ID2D1Effect itself and
++ * hand it to DrawImage(), so a mismatched vtbl is a legitimate case that
++ * callers handle by falling back. */
++struct d2d_effect *unsafe_impl_from_ID2D1Effect(ID2D1Effect *iface)
++{
++    if (!iface || iface->lpVtbl != &d2d_effect_vtbl)
++        return NULL;
++    return CONTAINING_RECORD(iface, struct d2d_effect, ID2D1Effect_iface);
++}
++
+ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
+         ID2D1Effect **effect)
+ {
+@@ -3426,11 +3609,98 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -350,7 +411,7 @@ index 286fae95e9c..92708c21d2b 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3472,8 +3707,9 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3472,8 +3742,9 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }

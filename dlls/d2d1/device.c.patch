@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..76be7dcbd27 100644
+index 552d6d4c24c..1f9df1e714e 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -10,17 +10,357 @@ index 552d6d4c24c..76be7dcbd27 100644
  
  WINE_DEFAULT_DEBUG_CHANNEL(d2d);
  
-@@ -1281,6 +1282,34 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
+@@ -282,6 +283,11 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
+         ID3D11Buffer_Release(context->ps_cb);
+         ID3D11PixelShader_Release(context->ps);
+         ID3D11Buffer_Release(context->vs_cb);
++        /* Created lazily, so may legitimately be NULL. */
++        if (context->effect_vs)
++            ID3D11VertexShader_Release(context->effect_vs);
++        if (context->effect_il)
++            ID3D11InputLayout_Release(context->effect_il);
+         for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
+         {
+             ID3D11VertexShader_Release(context->shape_resources[i].vs);
+@@ -1281,6 +1287,362 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
      }
  }
  
++/* Custom effect pixel shaders are compiled against a fixed D2D signature:
++ *
++ *     float4 main(float4 clip : SV_POSITION, float4 scene : SCENE_POSITION,
++ *                 float4 uv0 : TEXCOORD0, ...) : SV_TARGET
++ *
++ * A pixel shader's input semantics must be a subset of the vertex shader's
++ * output semantics, so this emits SCENE_POSITION even though nothing here
++ * consumes it -- an effect shader that declares it would otherwise fail to
++ * link. Positions are transformed on the CPU, so this is a pass-through. */
++static const char effect_vs_code[] =
++    "struct output\n"
++    "{\n"
++    "    float4 scene : SCENE_POSITION;\n"
++    "    float4 position : SV_POSITION;\n"
++    "};\n"
++    "\n"
++    "void main(float4 position : POSITION, float4 scene : SCENE_POSITION, out struct output o)\n"
++    "{\n"
++    "    o.position = position;\n"
++    "    o.scene = scene;\n"
++    "}\n";
++
++struct d2d_effect_vertex
++{
++    struct d2d_vec4 position;
++    struct d2d_vec4 scene;
++};
++
++static HRESULT d2d_device_context_ensure_effect_resources(struct d2d_device_context *context)
++{
++    static const D3D11_INPUT_ELEMENT_DESC il_desc[] =
++    {
++        {"POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0},
++        {"SCENE_POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0},
++    };
++    ID3D10Blob *compiled, *errors;
++    HRESULT hr;
++
++    if (context->effect_vs)
++        return S_OK;
++
++    if (FAILED(hr = D3DCompile(effect_vs_code, sizeof(effect_vs_code) - 1, "effect_vs", NULL, NULL,
++            "main", "vs_4_0", 0, 0, &compiled, &errors)))
++    {
++        WARN("Failed to compile the effect vertex shader, hr %#lx.\n", hr);
++        if (errors)
++        {
++            WARN("%s\n", (char *)ID3D10Blob_GetBufferPointer(errors));
++            ID3D10Blob_Release(errors);
++        }
++        return hr;
++    }
++    if (errors)
++        ID3D10Blob_Release(errors);
++
++    if (FAILED(hr = ID3D11Device1_CreateVertexShader(context->d3d_device,
++            ID3D10Blob_GetBufferPointer(compiled), ID3D10Blob_GetBufferSize(compiled),
++            NULL, &context->effect_vs)))
++    {
++        WARN("Failed to create the effect vertex shader, hr %#lx.\n", hr);
++        ID3D10Blob_Release(compiled);
++        return hr;
++    }
++
++    hr = ID3D11Device1_CreateInputLayout(context->d3d_device, il_desc, ARRAY_SIZE(il_desc),
++            ID3D10Blob_GetBufferPointer(compiled), ID3D10Blob_GetBufferSize(compiled),
++            &context->effect_il);
++    ID3D10Blob_Release(compiled);
++    if (FAILED(hr))
++    {
++        WARN("Failed to create the effect input layout, hr %#lx.\n", hr);
++        ID3D11VertexShader_Release(context->effect_vs);
++        context->effect_vs = NULL;
++        return hr;
++    }
++
++    return S_OK;
++}
++
++/* Map a point from DIP space through the current world transform into clip
++ * space, matching what the shape vertex shaders do on the GPU. */
++static void d2d_device_context_transform_to_clip(const struct d2d_device_context *context,
++        float x, float y, struct d2d_vec4 *out, struct d2d_vec4 *scene)
++{
++    const D2D_MATRIX_3X2_F *w = &context->drawing_state.transform;
++    float dpi_x = context->desc.dpiX / 96.0f;
++    float dpi_y = context->desc.dpiY / 96.0f;
++    float sx, sy;
++
++    sx = (w->_11 * x + w->_21 * y + w->_31) * dpi_x;
++    sy = (w->_12 * x + w->_22 * y + w->_32) * dpi_y;
++
++    scene->x = sx;
++    scene->y = sy;
++    scene->z = 0.0f;
++    scene->w = 1.0f;
++
++    out->x = sx * (2.0f / context->pixel_size.width) - 1.0f;
++    out->y = sy * (-2.0f / context->pixel_size.height) + 1.0f;
++    out->z = 0.0f;
++    out->w = 1.0f;
++}
++
++/* Render a single draw-transform node by running its pixel shader over
++ * dst_rect. This covers effects whose graph is one node with no inputs --
++ * generators such as a checkerboard or a solid fill, which produce their
++ * output entirely from the shader and so cannot be approximated by drawing
++ * an input image. */
++static HRESULT d2d_device_context_draw_effect_node(struct d2d_device_context *context,
++        const struct d2d_render_info *render_info, const D2D1_RECT_F *dst_rect)
++{
++    ID3D11DeviceContext1 *d3d_context;
++    ID3DDeviceContextState *prev_state;
++    struct d2d_effect_vertex vertices[6];
++    D3D11_SUBRESOURCE_DATA vertex_data;
++    ID3D11Buffer *vb = NULL, *cb = NULL;
++    struct d2d_vec4 corners[4], scene[4];
++    ID3D11PixelShader *ps = NULL;
++    D3D11_BUFFER_DESC buffer_desc;
++    unsigned int stride, offset;
++    D3D11_RECT scissor_rect;
++    IUnknown *object;
++    D3D11_VIEWPORT vp;
++    HRESULT hr;
++
++    if (!d2d_device_get_indexed_object(&context->device->shaders, &render_info->pixel_shader, &object))
++    {
++        WARN("Pixel shader %s is not loaded.\n", debugstr_guid(&render_info->pixel_shader));
++        return E_FAIL;
++    }
++
++    hr = IUnknown_QueryInterface(object, &IID_ID3D11PixelShader, (void **)&ps);
++    IUnknown_Release(object);
++    if (FAILED(hr))
++    {
++        WARN("Object %s is not a pixel shader, hr %#lx.\n", debugstr_guid(&render_info->pixel_shader), hr);
++        return hr;
++    }
++
++    if (FAILED(hr = d2d_device_context_ensure_effect_resources(context)))
++        goto done;
++
++    d2d_device_context_transform_to_clip(context, dst_rect->left,  dst_rect->top,    &corners[0], &scene[0]);
++    d2d_device_context_transform_to_clip(context, dst_rect->right, dst_rect->top,    &corners[1], &scene[1]);
++    d2d_device_context_transform_to_clip(context, dst_rect->left,  dst_rect->bottom, &corners[2], &scene[2]);
++    d2d_device_context_transform_to_clip(context, dst_rect->right, dst_rect->bottom, &corners[3], &scene[3]);
++
++    /* Two triangles: 0,1,2 and 2,1,3. */
++    vertices[0].position = corners[0]; vertices[0].scene = scene[0];
++    vertices[1].position = corners[1]; vertices[1].scene = scene[1];
++    vertices[2].position = corners[2]; vertices[2].scene = scene[2];
++    vertices[3].position = corners[2]; vertices[3].scene = scene[2];
++    vertices[4].position = corners[1]; vertices[4].scene = scene[1];
++    vertices[5].position = corners[3]; vertices[5].scene = scene[3];
++
++    buffer_desc.ByteWidth = sizeof(vertices);
++    buffer_desc.Usage = D3D11_USAGE_DEFAULT;
++    buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
++    buffer_desc.CPUAccessFlags = 0;
++    buffer_desc.MiscFlags = 0;
++    buffer_desc.StructureByteStride = 0;
++
++    vertex_data.pSysMem = vertices;
++    vertex_data.SysMemPitch = 0;
++    vertex_data.SysMemSlicePitch = 0;
++
++    if (FAILED(hr = ID3D11Device1_CreateBuffer(context->d3d_device, &buffer_desc, &vertex_data, &vb)))
++    {
++        WARN("Failed to create the effect vertex buffer, hr %#lx.\n", hr);
++        goto done;
++    }
++
++    if (render_info->mask & D2D_RENDER_INFO_PS_CONSTANT_BUFFER && render_info->ps_cb_size)
++    {
++        D3D11_SUBRESOURCE_DATA cb_data;
++
++        /* Constant buffers are sized in whole 16-byte registers. */
++        buffer_desc.ByteWidth = (render_info->ps_cb_size + 15) & ~15u;
++        buffer_desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
++
++        cb_data.pSysMem = render_info->ps_cb;
++        cb_data.SysMemPitch = 0;
++        cb_data.SysMemSlicePitch = 0;
++
++        if (buffer_desc.ByteWidth != render_info->ps_cb_size)
++        {
++            /* The tail padding would otherwise be uninitialised. */
++            BYTE *padded;
++
++            if (!(padded = calloc(1, buffer_desc.ByteWidth)))
++            {
++                hr = E_OUTOFMEMORY;
++                goto done;
++            }
++            memcpy(padded, render_info->ps_cb, render_info->ps_cb_size);
++            cb_data.pSysMem = padded;
++            hr = ID3D11Device1_CreateBuffer(context->d3d_device, &buffer_desc, &cb_data, &cb);
++            free(padded);
++        }
++        else
++        {
++            hr = ID3D11Device1_CreateBuffer(context->d3d_device, &buffer_desc, &cb_data, &cb);
++        }
++
++        if (FAILED(hr))
++        {
++            WARN("Failed to create the effect constant buffer, hr %#lx.\n", hr);
++            goto done;
++        }
++    }
++
++    vp.TopLeftX = 0.0f;
++    vp.TopLeftY = 0.0f;
++    vp.Width = context->pixel_size.width;
++    vp.Height = context->pixel_size.height;
++    vp.MinDepth = 0.0f;
++    vp.MaxDepth = 1.0f;
++
++    if (context->clip_stack.count)
++    {
++        const D2D1_RECT_F *clip_rect = &context->clip_stack.stack[context->clip_stack.count - 1];
++
++        scissor_rect.left = ceilf(clip_rect->left - 0.5f);
++        scissor_rect.top = ceilf(clip_rect->top - 0.5f);
++        scissor_rect.right = ceilf(clip_rect->right - 0.5f);
++        scissor_rect.bottom = ceilf(clip_rect->bottom - 0.5f);
++    }
++    else
++    {
++        scissor_rect.left = 0;
++        scissor_rect.top = 0;
++        scissor_rect.right = context->pixel_size.width;
++        scissor_rect.bottom = context->pixel_size.height;
++    }
++
++    if (context->cs)
++        EnterCriticalSection(context->cs);
++
++    ID3D11Device1_GetImmediateContext1(context->d3d_device, &d3d_context);
++    ID3D11DeviceContext1_SwapDeviceContextState(d3d_context, context->d3d_state, &prev_state);
++
++    stride = sizeof(*vertices);
++    offset = 0;
++    ID3D11DeviceContext1_IASetInputLayout(d3d_context, context->effect_il);
++    ID3D11DeviceContext1_IASetPrimitiveTopology(d3d_context, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
++    ID3D11DeviceContext1_IASetVertexBuffers(d3d_context, 0, 1, &vb, &stride, &offset);
++    ID3D11DeviceContext1_VSSetShader(d3d_context, context->effect_vs, NULL, 0);
++    ID3D11DeviceContext1_PSSetShader(d3d_context, ps, NULL, 0);
++    if (cb)
++        ID3D11DeviceContext1_PSSetConstantBuffers(d3d_context, 0, 1, &cb);
++    ID3D11DeviceContext1_RSSetViewports(d3d_context, 1, &vp);
++    ID3D11DeviceContext1_RSSetScissorRects(d3d_context, 1, &scissor_rect);
++    ID3D11DeviceContext1_RSSetState(d3d_context, context->rs);
++    ID3D11DeviceContext1_OMSetRenderTargets(d3d_context, 1, &context->target.bitmap->rtv, NULL);
++    ID3D11DeviceContext1_OMSetBlendState(d3d_context, context->bs, NULL, D3D11_DEFAULT_SAMPLE_MASK);
++
++    ID3D11DeviceContext1_Draw(d3d_context, ARRAY_SIZE(vertices), 0);
++
++    ID3D11DeviceContext1_SwapDeviceContextState(d3d_context, prev_state, NULL);
++    ID3D11DeviceContext1_Release(d3d_context);
++    ID3DDeviceContextState_Release(prev_state);
++
++    if (context->cs)
++        LeaveCriticalSection(context->cs);
++
++    hr = S_OK;
++
++done:
++    if (cb)
++        ID3D11Buffer_Release(cb);
++    if (vb)
++        ID3D11Buffer_Release(vb);
++    ID3D11PixelShader_Release(ps);
++
++    return hr;
++}
++
++/* Returns the render info for an effect that consists of a single node with
++ * no inputs, or NULL if the effect is anything more complicated. */
++static const struct d2d_render_info *d2d_effect_get_generator_render_info(struct d2d_effect *effect)
++{
++    struct d2d_transform_node *node;
++
++    if (!effect->graph || effect->input_count)
++        return NULL;
++
++    if (list_count(&effect->graph->nodes) != 1)
++        return NULL;
++
++    node = LIST_ENTRY(list_head(&effect->graph->nodes), struct d2d_transform_node, entry);
++    if (!node->render_info || !(node->render_info->mask & D2D_RENDER_INFO_PIXEL_SHADER))
++        return NULL;
++
++    return node->render_info;
++}
++
 +static void d2d_device_context_draw_effect(struct d2d_device_context *context, ID2D1Effect *effect,
 +        const D2D1_RECT_F *dst_rect, float opacity, D2D1_INTERPOLATION_MODE interpolation_mode,
 +        const D2D1_RECT_F *src_rect, const D2D1_POINT_2F *offset,
 +        const D2D1_MATRIX_4X4_F *perspective_transform)
 +{
++    const struct d2d_render_info *render_info;
++    struct d2d_effect *effect_impl;
 +    ID2D1Image *input;
 +    unsigned int i;
++
++    effect_impl = unsafe_impl_from_ID2D1Effect(effect);
++    if (effect_impl && (render_info = d2d_effect_get_generator_render_info(effect_impl)))
++    {
++        D2D1_RECT_F rect;
++
++        /* A generator has no inputs to derive bounds from, so fall back to
++         * the whole target when the caller does not specify a rectangle. */
++        if (dst_rect)
++        {
++            rect = *dst_rect;
++        }
++        else
++        {
++            rect.left = 0.0f;
++            rect.top = 0.0f;
++            rect.right = context->pixel_size.width;
++            rect.bottom = context->pixel_size.height;
++            if (offset)
++            {
++                rect.left += offset->x;
++                rect.top += offset->y;
++            }
++        }
++
++        if (SUCCEEDED(d2d_device_context_draw_effect_node(context, render_info, &rect)))
++            return;
++
++        /* Fall through to the input-image approximation below. */
++    }
 +
 +    FIXME("Drawing first input image instead of actual effect. context %p, effect %p, dst_rect %s, opacity %.8e, interpolation_mode %#x, src_rect %s, offset %p, perspective_transform %p.\n",
 +            context, effect, debug_d2d_rect_f(dst_rect), opacity, interpolation_mode, debug_d2d_rect_f(src_rect), offset, perspective_transform);
@@ -45,7 +385,7 @@ index 552d6d4c24c..76be7dcbd27 100644
  static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
          const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
          ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
-@@ -2199,13 +2228,327 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
+@@ -2199,13 +2561,327 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
      return hr;
  }
  
@@ -375,7 +715,7 @@ index 552d6d4c24c..76be7dcbd27 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilename(ID2D1DeviceContext6 *iface,
-@@ -2219,8 +2562,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
+@@ -2219,8 +2895,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromWicColorContext(ID2D1DeviceContext6 *iface,
          IWICColorContext *wic_color_context, ID2D1ColorContext **color_context)
  {
@@ -386,7 +726,7 @@ index 552d6d4c24c..76be7dcbd27 100644
 +    UINT size;
 +    BYTE *pbBuffer;
 +    UINT exif_color;
- 
++
 +    TRACE("iface %p, wic_color_context %p, color_context %p!\n", iface, wic_color_context, color_context);
 +
 +    IWICColorContext_GetType(wic_color_context, &type);
@@ -402,7 +742,7 @@ index 552d6d4c24c..76be7dcbd27 100644
 +
 +        if (FAILED(hr = IWICColorContext_GetProfileBytes(wic_color_context, size, pbBuffer, &size)))
 +            return hr;
-+
+ 
 +        return d2d_device_context_CreateColorContext(iface, D2D1_COLOR_SPACE_CUSTOM, pbBuffer, size, color_context);
 +    }
 +    else if (type == WICColorContextExifColorSpace)
@@ -422,7 +762,7 @@ index 552d6d4c24c..76be7dcbd27 100644
      return E_NOTIMPL;
  }
  
-@@ -2330,7 +2710,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
+@@ -2330,7 +3043,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
              iface, stops, stop_count, preinterpolation_space, postinterpolation_space,
              buffer_precision, extend_mode, color_interpolation_mode, gradient);
  
@@ -431,7 +771,7 @@ index 552d6d4c24c..76be7dcbd27 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1DeviceContext6 *iface,
-@@ -2387,6 +2767,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
+@@ -2387,6 +3100,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
  {
      FIXME("iface %p, format %#x stub!\n", iface, format);
  
@@ -439,7 +779,7 @@ index 552d6d4c24c..76be7dcbd27 100644
      return FALSE;
  }
  
-@@ -2427,6 +2808,11 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2427,6 +3141,11 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
      D2D_SIZE_U pixel_size;
      ID2D1Bitmap *bitmap;
      D2D_SIZE_F size;
@@ -451,7 +791,7 @@ index 552d6d4c24c..76be7dcbd27 100644
  
      TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
  
-@@ -2456,7 +2842,37 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2456,7 +3175,37 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
  
          return S_OK;
      }
@@ -490,7 +830,7 @@ index 552d6d4c24c..76be7dcbd27 100644
      {
          FIXME("Unable to get local bounds of image %p.\n", image);
  
-@@ -2719,6 +3135,8 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2719,6 +3468,8 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
      ID2D1Bitmap *bitmap;
@@ -499,7 +839,7 @@ index 552d6d4c24c..76be7dcbd27 100644
  
      TRACE("iface %p, image %p, target_offset %s, image_rect %s, interpolation_mode %#x, composite_mode %#x.\n",
              iface, image, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
-@@ -2750,6 +3168,20 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2750,6 +3501,20 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          ID2D1Bitmap_Release(bitmap);
          return;
      }
