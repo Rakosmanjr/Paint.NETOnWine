@@ -1,0 +1,13 @@
+diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
+index d406fecca18..7125ef7f7ae 100644
+--- a/dlls/d2d1/tests/d2d1.c
++++ b/dlls/d2d1/tests/d2d1.c
+@@ -16577,7 +16577,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+     get_surface_readback(&ctx, &rb);
+     colour = get_readback_colour(&rb, 0, 0);
+     expected_colour = 0x661a334c;
+-    todo_wine ok(compare_colour(colour, expected_colour, 1),
++    ok(compare_colour(colour, expected_colour, 1),
+             "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
+     release_resource_readback(&rb);
+ 
