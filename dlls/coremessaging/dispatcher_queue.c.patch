@@ -1,6 +1,6 @@
 diff --git a/dlls/coremessaging/dispatcher_queue.c b/dlls/coremessaging/dispatcher_queue.c
 new file mode 100644
-index 00000000000..d3f075244f7
+index 00000000000..1bc5abc9376
 --- /dev/null
 +++ b/dlls/coremessaging/dispatcher_queue.c
 @@ -0,0 +1,296 @@
