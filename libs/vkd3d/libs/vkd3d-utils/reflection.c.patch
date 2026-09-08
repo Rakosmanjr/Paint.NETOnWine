@@ -1,0 +1,23 @@
+diff --git a/libs/vkd3d/libs/vkd3d-utils/reflection.c b/libs/vkd3d/libs/vkd3d-utils/reflection.c
+index db5a9852e16..d49eaedef1e 100644
+--- a/libs/vkd3d/libs/vkd3d-utils/reflection.c
++++ b/libs/vkd3d/libs/vkd3d-utils/reflection.c
+@@ -845,9 +845,16 @@ static UINT STDMETHODCALLTYPE d3d12_reflection_GetNumInterfaceSlots(ID3D12Shader
+ static HRESULT STDMETHODCALLTYPE d3d12_reflection_GetMinFeatureLevel(
+         ID3D12ShaderReflection *iface, D3D_FEATURE_LEVEL *level)
+ {
+-    FIXME("iface %p, level %p stub!\n", iface, level);
++    FIXME("iface %p, level %p semi-stub!\n", iface, level);
+ 
+-    return E_NOTIMPL;
++    if (!level)
++        return E_INVALIDARG;
++
++    /* Not derived from the shader version yet; 10_0 is low enough that
++     * callers gate features on it rather than refusing to run. */
++    *level = D3D_FEATURE_LEVEL_10_0;
++
++    return S_OK;
+ }
+ 
+ static UINT STDMETHODCALLTYPE d3d12_reflection_GetThreadGroupSize(
