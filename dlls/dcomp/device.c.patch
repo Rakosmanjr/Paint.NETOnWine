@@ -1,8 +1,8 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..db265d9b457 100644
+index 2744d758e91..bbfe13bcd07 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
-@@ -15,13 +15,27 @@
+@@ -15,16 +15,34 @@
   * License along with this library; if not, write to the Free Software
   * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
   */
@@ -30,7 +30,14 @@ index 2744d758e91..db265d9b457 100644
  
  WINE_DEFAULT_DEBUG_CHANNEL(dcomp);
  
-@@ -45,3 +59,472 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
++typedef __FITypedEventHandler_2_Windows__CUI__CComposition__CCore__CCompositorController_IInspectable ICommitNeededHandler;
++#define ICommitNeededHandler_AddRef __FITypedEventHandler_2_Windows__CUI__CComposition__CCore__CCompositorController_IInspectable_AddRef
++#define ICommitNeededHandler_Release __FITypedEventHandler_2_Windows__CUI__CComposition__CCore__CCompositorController_IInspectable_Release
++
+ HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
+ {
+     FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
+@@ -45,3 +63,512 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -326,6 +333,10 @@ index 2744d758e91..db265d9b457 100644
 +
 +    /* A controller always hands out the same compositor, created on demand. */
 +    __x_ABI_CWindows_CUI_CComposition_CICompositor *compositor;
++
++    /* CommitNeeded listeners, indexed by token value. */
++    ICommitNeededHandler **handlers;
++    SIZE_T handler_count;
 +};
 +
 +static CRITICAL_SECTION compositor_controller_cs;
@@ -420,30 +431,66 @@ index 2744d758e91..db265d9b457 100644
 +
 +static HRESULT WINAPI compositor_controller_Commit( ICompositorController *iface )
 +{
-+    //struct compositor_controller *impl = impl_from_ICompositorController( iface );
-+    TRACE( "STUB iface %p. \n", iface);
++    /* Nothing is composited yet, so a commit has nothing to flush. */
++    TRACE( "iface %p.\n", iface );
 +    return S_OK;
 +}
 +
 +static HRESULT WINAPI compositor_controller_EnsurePreviousCommitCompletedAsync( ICompositorController *iface, __x_ABI_CWindows_CFoundation_CIAsyncAction **operation )
 +{
-+    //struct compositor_controller *impl = impl_from_ICompositorController( iface );
-+    TRACE( "STUB iface %p. \n", iface);
-+    return S_OK;
++    FIXME( "iface %p, operation %p stub.\n", iface, operation );
++
++    if (!operation) return E_POINTER;
++
++    *operation = NULL;
++    return E_NOTIMPL;
 +}
 +
-+static HRESULT WINAPI compositor_controller_add_CommitNeeded( ICompositorController *iface, __FITypedEventHandler_2_Windows__CUI__CComposition__CCore__CCompositorController_IInspectable *handler,
++static HRESULT WINAPI compositor_controller_add_CommitNeeded( ICompositorController *iface, ICommitNeededHandler *handler,
 +        EventRegistrationToken *token )
 +{
-+    //struct compositor_controller *impl = impl_from_ICompositorController( iface );
-+    TRACE( "STUB iface %p. \n", iface);
-+    return S_OK;
++    struct compositor_controller *impl = impl_from_ICompositorController( iface );
++    ICommitNeededHandler **handlers;
++    HRESULT hr = S_OK;
++
++    TRACE( "iface %p, handler %p, token %p.\n", iface, handler, token );
++
++    if (!token) return E_POINTER;
++    if (!handler) return E_INVALIDARG;
++
++    EnterCriticalSection( &compositor_controller_cs );
++    if (!(handlers = realloc( impl->handlers, (impl->handler_count + 1) * sizeof(*handlers) )))
++        hr = E_OUTOFMEMORY;
++    else
++    {
++        impl->handlers = handlers;
++        impl->handlers[impl->handler_count++] = handler;
++        ICommitNeededHandler_AddRef( handler );
++        /* Tokens are one-based so that a zeroed token never matches. */
++        token->value = impl->handler_count;
++    }
++    LeaveCriticalSection( &compositor_controller_cs );
++
++    if (FAILED(hr)) token->value = 0;
++    return hr;
 +}
 +
 +static HRESULT WINAPI compositor_controller_remove_CommitNeeded( ICompositorController *iface, EventRegistrationToken token )
 +{
-+    //struct compositor_controller *impl = impl_from_ICompositorController( iface );
-+    TRACE( "STUB iface %p. \n", iface);
++    struct compositor_controller *impl = impl_from_ICompositorController( iface );
++    ICommitNeededHandler *handler = NULL;
++
++    TRACE( "iface %p, token %#I64x.\n", iface, token.value );
++
++    EnterCriticalSection( &compositor_controller_cs );
++    if (token.value > 0 && (SIZE_T)token.value <= impl->handler_count)
++    {
++        handler = impl->handlers[token.value - 1];
++        impl->handlers[token.value - 1] = NULL;
++    }
++    LeaveCriticalSection( &compositor_controller_cs );
++
++    if (handler) ICommitNeededHandler_Release( handler );
 +    return S_OK;
 +}
 +
