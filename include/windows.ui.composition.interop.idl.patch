@@ -1,0 +1,30 @@
+diff --git a/include/windows.ui.composition.interop.idl b/include/windows.ui.composition.interop.idl
+index d3a39d4d50d..bc82a27a8e0 100644
+--- a/include/windows.ui.composition.interop.idl
++++ b/include/windows.ui.composition.interop.idl
+@@ -21,11 +21,25 @@
+ #endif
+ 
+ import "windows.ui.composition.idl";
++import "windows.ui.composition.desktop.idl";
+ import "sdkddkver.h";
+ 
+ namespace Windows.UI.Composition {
++    interface ICompositorDesktopInterop;
+     interface ICompositorInterop;
+ 
++    [
++        object,
++        uuid(29e691fa-4567-4dca-b319-d0f207eb6807),
++        pointer_default(unique)
++    ]
++    interface ICompositorDesktopInterop : IUnknown
++    {
++        HRESULT CreateDesktopWindowTarget([in] HWND hwnd, [in] BOOL topmost,
++                [out, retval] Windows.UI.Composition.Desktop.IDesktopWindowTarget **result);
++        HRESULT EnsureOnThread([in] DWORD thread_id);
++    };
++
+     [
+         object,
+         uuid(25297d5c-3ad4-4c9c-b5cf-e36a38512330),

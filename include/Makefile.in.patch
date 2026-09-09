@@ -1,9 +1,12 @@
 diff --git a/include/Makefile.in b/include/Makefile.in
-index 3f23c63d3ea..9345cb6f302 100644
+index 3f23c63d3ea..7028bf4c727 100644
 --- a/include/Makefile.in
 +++ b/include/Makefile.in
-@@ -1099,6 +1099,7 @@ SOURCES = \
+@@ -1097,8 +1097,10 @@ SOURCES = \
+ 	windows.system.profile.systemmanufacturers.idl \
+ 	windows.system.threading.idl \
  	windows.system.userprofile.idl \
++	windows.ui.composition.desktop.idl \
  	windows.ui.composition.idl \
  	windows.ui.composition.interop.idl \
 +	windows.ui.composition.core.idl \

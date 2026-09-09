@@ -1,0 +1,56 @@
+diff --git a/include/windows.ui.composition.desktop.idl b/include/windows.ui.composition.desktop.idl
+new file mode 100644
+index 00000000000..e903b03e771
+--- /dev/null
++++ b/include/windows.ui.composition.desktop.idl
+@@ -0,0 +1,50 @@
++/*
++ * Copyright 2026 James Rakos
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * This library is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
++ */
++
++#ifdef __WIDL__
++#pragma winrt ns_prefix
++#endif
++
++import "windows.ui.composition.idl";
++import "sdkddkver.h";
++
++namespace Windows.UI.Composition.Desktop {
++    interface IDesktopWindowTarget;
++
++    runtimeclass DesktopWindowTarget;
++
++    [
++        contract(Windows.Foundation.UniversalApiContract, 6.0),
++        exclusiveto(Windows.UI.Composition.Desktop.DesktopWindowTarget),
++        uuid(6329d6ca-3366-490e-9db3-25312929ac51)
++    ]
++    interface IDesktopWindowTarget : IInspectable
++    {
++        [propget] HRESULT IsTopmost([out, retval] boolean *value);
++    }
++
++    [
++        contract(Windows.Foundation.UniversalApiContract, 6.0),
++        marshaling_behavior(agile),
++        threading(both)
++    ]
++    runtimeclass DesktopWindowTarget : Windows.UI.Composition.CompositionTarget
++    {
++        [default] interface Windows.UI.Composition.Desktop.IDesktopWindowTarget;
++    }
++}
