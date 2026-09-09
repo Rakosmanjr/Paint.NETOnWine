@@ -1,12 +1,13 @@
 diff --git a/dlls/dcomp/private.h b/dlls/dcomp/private.h
 new file mode 100644
-index 00000000000..16eefcf508e
+index 00000000000..f0b1dbffc7f
 --- /dev/null
 +++ b/dlls/dcomp/private.h
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,80 @@
 +#ifndef __WINE_DCOMP_PRIVATE_H
 +#define __WINE_DCOMP_PRIVATE_H
 +
++#include <math.h>
 +#include <stdarg.h>
 +#include <stddef.h>
 +
@@ -22,6 +23,8 @@ index 00000000000..16eefcf508e
 +
 +#include "unknwn.h"
 +#include "dxgi.h"
++#include "d3d11.h"
++#include "wine/list.h"
 +
 +/* Define every namespace before the first include: these headers import each
 + * other, and a namespace only gets short names if its macro is set when its

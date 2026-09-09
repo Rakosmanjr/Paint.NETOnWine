@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..5d59618a264 100644
+index 2744d758e91..2c22bde99bf 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,16 +15,44 @@
@@ -47,7 +47,7 @@ index 2744d758e91..5d59618a264 100644
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +73,1838 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +73,2090 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -74,6 +74,9 @@ index 2744d758e91..5d59618a264 100644
 +    LONG ref;
 +
 +    IUnknown *content;
++    /* The present the window was last drawn from, so that a commit that
++     * changes nothing does not stamp the same frame down again. */
++    UINT composited_present;
 +};
 +
 +static inline struct composition_surface *impl_from_ICompositionSurface( ICompositionSurface *iface )
@@ -1041,6 +1044,7 @@ index 2744d758e91..5d59618a264 100644
 + * what a compositor would draw into that window. */
 +struct desktop_window_target
 +{
++    struct list entry;
 +    IDesktopWindowTarget IDesktopWindowTarget_iface;
 +    ICompositionTarget ICompositionTarget_iface;
 +    IClosable IClosable_iface;
@@ -1050,6 +1054,10 @@ index 2744d758e91..5d59618a264 100644
 +    boolean topmost;
 +    IVisual *root;
 +};
++
++/* Every live target, so that a commit can find the trees to draw. Guarded by
++ * compositor_controller_cs. */
++static struct list composition_targets = LIST_INIT( composition_targets );
 +
 +static inline struct desktop_window_target *impl_from_IDesktopWindowTarget( IDesktopWindowTarget *iface )
 +{
@@ -1108,6 +1116,10 @@ index 2744d758e91..5d59618a264 100644
 +
 +    if (!ref)
 +    {
++        EnterCriticalSection( &compositor_controller_cs );
++        list_remove( &impl->entry );
++        LeaveCriticalSection( &compositor_controller_cs );
++
 +        if (impl->root) IVisual_Release( impl->root );
 +        free( impl );
 +    }
@@ -1181,9 +1193,6 @@ index 2744d758e91..5d59618a264 100644
 +    if (impl->root) IVisual_Release( impl->root );
 +    impl->root = value;
 +
-+    /* Nothing walks the visual tree yet, so the window stays as whatever else
-+     * drew to it. */
-+    FIXME( "Visual tree for window %p is not composited.\n", impl->hwnd );
 +    return S_OK;
 +}
 +
@@ -1244,6 +1253,10 @@ index 2744d758e91..5d59618a264 100644
 +    impl->ref = 1;
 +    impl->hwnd = hwnd;
 +    impl->topmost = !!topmost;
++
++    EnterCriticalSection( &compositor_controller_cs );
++    list_add_tail( &composition_targets, &impl->entry );
++    LeaveCriticalSection( &compositor_controller_cs );
 +
 +    *out = &impl->IDesktopWindowTarget_iface;
 +
@@ -1765,10 +1778,249 @@ index 2744d758e91..5d59618a264 100644
 +}
 +
 +
++
++/* Half floats, as composition surfaces in scRGB use them. */
++static float half_to_float( unsigned short h )
++{
++    unsigned int sign = (h >> 15) & 1, exponent = (h >> 10) & 0x1f, mantissa = h & 0x3ff;
++    union { unsigned int i; float f; } u;
++
++    if (!exponent) /* zero or subnormal */
++    {
++        if (!mantissa) u.i = sign << 31;
++        else
++        {
++            exponent = 127 - 15 + 1;
++            while (!(mantissa & 0x400))
++            {
++                mantissa <<= 1;
++                --exponent;
++            }
++            u.i = (sign << 31) | (exponent << 23) | ((mantissa & 0x3ff) << 13);
++        }
++    }
++    else if (exponent == 0x1f) u.i = (sign << 31) | 0x7f800000 | (mantissa << 13);
++    else u.i = (sign << 31) | ((exponent - 15 + 127) << 23) | (mantissa << 13);
++
++    return u.f;
++}
++
++static unsigned char scrgb_to_srgb( float c )
++{
++    if (c <= 0.0f) return 0;
++    if (c >= 1.0f) return 255;
++    c = c <= 0.0031308f ? c * 12.92f : 1.055f * powf( c, 1.0f / 2.4f ) - 0.055f;
++    return (unsigned char)(c * 255.0f + 0.5f);
++}
++
++/* Composition surfaces are not always the layout GDI wants to be handed, so
++ * put the pixels in the one shape it understands. */
++static BOOL composition_surface_to_bgra( const D3D11_MAPPED_SUBRESOURCE *map, const D3D11_TEXTURE2D_DESC *desc,
++        DWORD *out )
++{
++    unsigned int x, y;
++
++    switch (desc->Format)
++    {
++    case DXGI_FORMAT_B8G8R8A8_UNORM:
++    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
++    case DXGI_FORMAT_B8G8R8X8_UNORM:
++        for (y = 0; y < desc->Height; ++y)
++            memcpy( out + y * desc->Width, (const char *)map->pData + y * map->RowPitch, desc->Width * 4 );
++        return TRUE;
++
++    case DXGI_FORMAT_R8G8B8A8_UNORM:
++    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
++        for (y = 0; y < desc->Height; ++y)
++        {
++            const DWORD *src = (const DWORD *)((const char *)map->pData + y * map->RowPitch);
++            for (x = 0; x < desc->Width; ++x)
++            {
++                DWORD p = src[x];
++                out[y * desc->Width + x] = (p & 0xff00ff00) | ((p & 0xff) << 16) | ((p >> 16) & 0xff);
++            }
++        }
++        return TRUE;
++
++    case DXGI_FORMAT_R16G16B16A16_FLOAT:
++        for (y = 0; y < desc->Height; ++y)
++        {
++            const unsigned short *src = (const unsigned short *)((const char *)map->pData + y * map->RowPitch);
++            for (x = 0; x < desc->Width; ++x)
++            {
++                const unsigned short *p = src + x * 4;
++                float a = half_to_float( p[3] );
++                out[y * desc->Width + x] = (((DWORD)(a < 0.0f ? 0.0f : a > 1.0f ? 255.0f : a * 255.0f + 0.5f)) << 24)
++                        | (scrgb_to_srgb( half_to_float( p[0] ) ) << 16)
++                        | (scrgb_to_srgb( half_to_float( p[1] ) ) << 8)
++                        | scrgb_to_srgb( half_to_float( p[2] ) );
++            }
++        }
++        return TRUE;
++
++    default:
++        FIXME( "Unhandled composition surface format %#x.\n", desc->Format );
++        return FALSE;
++    }
++}
++
++/* Compositing a visual tree means getting whatever an application rendered
++ * into its composition surfaces onto the window the tree is targeting.
++ * Nothing here is fast: a commit reads the surface back through a staging
++ * texture and blits it with GDI. It is enough to make the content visible. */
++static void composite_surface_to_window( HWND hwnd, struct composition_surface *surface, const RECT *dest, BYTE opacity )
++{
++    D3D11_TEXTURE2D_DESC desc, staging_desc;
++    ID3D11Texture2D *buffer, *staging;
++    D3D11_MAPPED_SUBRESOURCE map;
++    ID3D11DeviceContext *context;
++    IDXGISwapChain *swapchain;
++    BITMAPINFO info = {{0}};
++    UINT present_count;
++    HBITMAP bitmap;
++    DWORD *pixels;
++    ID3D11Device *device;
++    HRESULT hr;
++    HDC hdc;
++
++    if (FAILED(IUnknown_QueryInterface( surface->content, &IID_IDXGISwapChain, (void **)&swapchain )))
++    {
++        FIXME( "Cannot composite surface content %p.\n", surface->content );
++        return;
++    }
++
++    /* Until the application has presented, the buffer holds nothing it put
++     * there, and drawing it would put stale memory on screen. Once it has,
++     * there is nothing new to draw until it presents again. */
++    if (SUCCEEDED(IDXGISwapChain_GetLastPresentCount( swapchain, &present_count ))
++            && (!present_count || present_count == surface->composited_present))
++    {
++        TRACE( "Swap chain %p has nothing new to show.\n", swapchain );
++        IDXGISwapChain_Release( swapchain );
++        return;
++    }
++    surface->composited_present = present_count;
++
++    hr = IDXGISwapChain_GetBuffer( swapchain, 0, &IID_ID3D11Texture2D, (void **)&buffer );
++    IDXGISwapChain_Release( swapchain );
++    if (FAILED(hr))
++    {
++        WARN( "Failed to get swap chain buffer, hr %#lx.\n", hr );
++        return;
++    }
++
++    ID3D11Texture2D_GetDesc( buffer, &desc );
++    ID3D11Texture2D_GetDevice( buffer, &device );
++    ID3D11Device_GetImmediateContext( device, &context );
++
++    /* The back buffer is not readable by the CPU, so take a copy that is. */
++    staging_desc = desc;
++    staging_desc.Usage = D3D11_USAGE_STAGING;
++    staging_desc.BindFlags = 0;
++    staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
++    staging_desc.MiscFlags = 0;
++    staging_desc.SampleDesc.Count = 1;
++    staging_desc.SampleDesc.Quality = 0;
++
++    if (SUCCEEDED(hr = ID3D11Device_CreateTexture2D( device, &staging_desc, NULL, &staging )))
++    {
++        ID3D11DeviceContext_CopyResource( context, (ID3D11Resource *)staging, (ID3D11Resource *)buffer );
++
++        if (SUCCEEDED(hr = ID3D11DeviceContext_Map( context, (ID3D11Resource *)staging, 0,
++                                                    D3D11_MAP_READ, 0, &map )))
++        {
++            info.bmiHeader.biSize = sizeof(info.bmiHeader);
++            info.bmiHeader.biWidth = desc.Width;
++            /* Negative height: composition surfaces are top-down. */
++            info.bmiHeader.biHeight = -(LONG)desc.Height;
++            info.bmiHeader.biPlanes = 1;
++            info.bmiHeader.biBitCount = 32;
++            info.bmiHeader.biCompression = BI_RGB;
++
++            if ((bitmap = CreateDIBSection( NULL, &info, DIB_RGB_COLORS, (void **)&pixels, NULL, 0 )))
++            {
++                if (composition_surface_to_bgra( &map, &desc, pixels ) && (hdc = GetDC( hwnd )))
++                {
++                    BLENDFUNCTION blend = {AC_SRC_OVER, 0, opacity, AC_SRC_ALPHA};
++                    HDC src_hdc = CreateCompatibleDC( hdc );
++                    HBITMAP prev = SelectObject( src_hdc, bitmap );
++
++                    /* A visual is drawn over what is already on the window, not
++                     * stamped onto it: what it leaves transparent has to stay. */
++                    GdiAlphaBlend( hdc, dest->left, dest->top,
++                                   dest->right - dest->left, dest->bottom - dest->top,
++                                   src_hdc, 0, 0, desc.Width, desc.Height, blend );
++
++                    SelectObject( src_hdc, prev );
++                    DeleteDC( src_hdc );
++                    ReleaseDC( hwnd, hdc );
++                }
++                DeleteObject( bitmap );
++            }
++
++            ID3D11DeviceContext_Unmap( context, (ID3D11Resource *)staging, 0 );
++        }
++        else WARN( "Failed to map staging texture, hr %#lx.\n", hr );
++
++        ID3D11Texture2D_Release( staging );
++    }
++    else WARN( "Failed to create staging texture, hr %#lx.\n", hr );
++
++    ID3D11DeviceContext_Release( context );
++    ID3D11Device_Release( device );
++    ID3D11Texture2D_Release( buffer );
++}
++
++static void composite_target( struct desktop_window_target *target )
++{
++    struct surface_brush *brush;
++    struct visual *visual;
++    BYTE opacity;
++    RECT dest;
++
++    if (!target->root) return;
++    /* Only visuals this module made can be walked. */
++    if (target->root->lpVtbl != &visual_vtbl) return;
++
++    visual = impl_from_IVisual( target->root );
++    if (!visual->is_visible || !visual->brush) return;
++    if (visual->brush->lpVtbl != (const ICompositionBrushVtbl *)&composition_brush_vtbl) return;
++
++    brush = CONTAINING_RECORD( visual->brush, struct surface_brush, ICompositionBrush_iface );
++    if (!brush->surface) return;
++
++    if (brush->surface->lpVtbl != &composition_surface_vtbl) return;
++    if (!CONTAINING_RECORD( brush->surface, struct composition_surface, ICompositionSurface_iface )->content)
++        return;
++
++    dest.left = (LONG)visual->offset.X;
++    dest.top = (LONG)visual->offset.Y;
++    dest.right = dest.left + (LONG)visual->size.X;
++    dest.bottom = dest.top + (LONG)visual->size.Y;
++
++    TRACE( "compositing visual %p into window %p, %s.\n", visual, target->hwnd, wine_dbgstr_rect( &dest ) );
++
++    opacity = visual->opacity <= 0.0f ? 0 : visual->opacity >= 1.0f ? 0xff
++            : (BYTE)(visual->opacity * 255.0f + 0.5f);
++    if (!opacity)
++        return;
++
++    composite_surface_to_window( target->hwnd,
++            CONTAINING_RECORD( brush->surface, struct composition_surface, ICompositionSurface_iface ),
++            &dest, opacity );
++}
++
 +static HRESULT WINAPI compositor_controller_Commit( ICompositorController *iface )
 +{
-+    /* Nothing is composited yet, so a commit has nothing to flush. */
++    struct desktop_window_target *target;
++
 +    TRACE( "iface %p.\n", iface );
++
++    EnterCriticalSection( &compositor_controller_cs );
++    LIST_FOR_EACH_ENTRY( target, &composition_targets, struct desktop_window_target, entry )
++            composite_target( target );
++    LeaveCriticalSection( &compositor_controller_cs );
++
 +    return S_OK;
 +}
 +
