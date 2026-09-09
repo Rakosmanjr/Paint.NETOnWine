@@ -1,10 +1,10 @@
 diff --git a/dlls/dcomp/Makefile.in b/dlls/dcomp/Makefile.in
-index 3c14125a2ff..7c7340782e9 100644
+index 3c14125a2ff..de3c1a84699 100644
 --- a/dlls/dcomp/Makefile.in
 +++ b/dlls/dcomp/Makefile.in
 @@ -1,6 +1,9 @@
  MODULE    = dcomp.dll
-+IMPORTS = uuid combase
++IMPORTS = uuid combase user32
 +IMPORTLIB = dcomp
  
  VER_PRODUCTVERSION = 10,0,14393,0

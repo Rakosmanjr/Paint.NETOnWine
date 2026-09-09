@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..bbfe13bcd07 100644
+index 2744d758e91..99d52918e8a 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,16 +15,34 @@
@@ -37,7 +37,7 @@ index 2744d758e91..bbfe13bcd07 100644
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +63,512 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +63,785 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -53,9 +53,223 @@ index 2744d758e91..bbfe13bcd07 100644
 + * different interface with a different vtable, so any call through it
 + * dispatched on the wrong slot.
 + */
++/* A composition target bound to a window. The visual tree set as its root is
++ * what a compositor would draw into that window. */
++struct desktop_window_target
++{
++    IDesktopWindowTarget IDesktopWindowTarget_iface;
++    ICompositionTarget ICompositionTarget_iface;
++    IClosable IClosable_iface;
++    LONG ref;
++
++    HWND hwnd;
++    boolean topmost;
++    IVisual *root;
++};
++
++static inline struct desktop_window_target *impl_from_IDesktopWindowTarget( IDesktopWindowTarget *iface )
++{
++    return CONTAINING_RECORD( iface, struct desktop_window_target, IDesktopWindowTarget_iface );
++}
++
++static HRESULT WINAPI desktop_window_target_QueryInterface( IDesktopWindowTarget *iface, REFIID iid, void **out )
++{
++    struct desktop_window_target *impl = impl_from_IDesktopWindowTarget( iface );
++
++    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
++
++    if (IsEqualGUID( iid, &IID_IUnknown ) ||
++        IsEqualGUID( iid, &IID_IInspectable ) ||
++        IsEqualGUID( iid, &IID_IAgileObject ) ||
++        IsEqualGUID( iid, &IID_IDesktopWindowTarget ))
++    {
++        IDesktopWindowTarget_AddRef( iface );
++        *out = &impl->IDesktopWindowTarget_iface;
++        return S_OK;
++    }
++
++    if (IsEqualGUID( iid, &IID_ICompositionTarget ))
++    {
++        IDesktopWindowTarget_AddRef( iface );
++        *out = &impl->ICompositionTarget_iface;
++        return S_OK;
++    }
++
++    if (IsEqualGUID( iid, &IID_IClosable ))
++    {
++        IDesktopWindowTarget_AddRef( iface );
++        *out = &impl->IClosable_iface;
++        return S_OK;
++    }
++
++    FIXME( "%s not implemented.\n", debugstr_guid( iid ) );
++    *out = NULL;
++    return E_NOINTERFACE;
++}
++
++static ULONG WINAPI desktop_window_target_AddRef( IDesktopWindowTarget *iface )
++{
++    struct desktop_window_target *impl = impl_from_IDesktopWindowTarget( iface );
++    ULONG ref = InterlockedIncrement( &impl->ref );
++    TRACE( "iface %p increasing refcount to %lu.\n", iface, ref );
++    return ref;
++}
++
++static ULONG WINAPI desktop_window_target_Release( IDesktopWindowTarget *iface )
++{
++    struct desktop_window_target *impl = impl_from_IDesktopWindowTarget( iface );
++    ULONG ref = InterlockedDecrement( &impl->ref );
++
++    TRACE( "iface %p decreasing refcount to %lu.\n", iface, ref );
++
++    if (!ref)
++    {
++        if (impl->root) IVisual_Release( impl->root );
++        free( impl );
++    }
++
++    return ref;
++}
++
++static HRESULT WINAPI desktop_window_target_GetIids( IDesktopWindowTarget *iface, ULONG *iid_count, IID **iids )
++{
++    FIXME( "iface %p, iid_count %p, iids %p stub.\n", iface, iid_count, iids );
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI desktop_window_target_GetRuntimeClassName( IDesktopWindowTarget *iface, HSTRING *class_name )
++{
++    TRACE( "iface %p, class_name %p.\n", iface, class_name );
++    return WindowsCreateString( RuntimeClass_Windows_UI_Composition_Desktop_DesktopWindowTarget,
++                                ARRAY_SIZE(RuntimeClass_Windows_UI_Composition_Desktop_DesktopWindowTarget) - 1,
++                                class_name );
++}
++
++static HRESULT WINAPI desktop_window_target_GetTrustLevel( IDesktopWindowTarget *iface, TrustLevel *trust_level )
++{
++    TRACE( "iface %p, trust_level %p.\n", iface, trust_level );
++    *trust_level = BaseTrust;
++    return S_OK;
++}
++
++static HRESULT WINAPI desktop_window_target_get_IsTopmost( IDesktopWindowTarget *iface, boolean *value )
++{
++    struct desktop_window_target *impl = impl_from_IDesktopWindowTarget( iface );
++
++    TRACE( "iface %p, value %p.\n", iface, value );
++
++    *value = impl->topmost;
++    return S_OK;
++}
++
++static const struct IDesktopWindowTargetVtbl desktop_window_target_vtbl =
++{
++    desktop_window_target_QueryInterface,
++    desktop_window_target_AddRef,
++    desktop_window_target_Release,
++    /* IInspectable methods */
++    desktop_window_target_GetIids,
++    desktop_window_target_GetRuntimeClassName,
++    desktop_window_target_GetTrustLevel,
++    /* IDesktopWindowTarget methods */
++    desktop_window_target_get_IsTopmost,
++};
++
++DEFINE_IINSPECTABLE( composition_target, ICompositionTarget, struct desktop_window_target, IDesktopWindowTarget_iface )
++
++static HRESULT WINAPI composition_target_get_Root( ICompositionTarget *iface, IVisual **value )
++{
++    struct desktop_window_target *impl = impl_from_ICompositionTarget( iface );
++
++    TRACE( "iface %p, value %p.\n", iface, value );
++
++    if ((*value = impl->root)) IVisual_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI composition_target_put_Root( ICompositionTarget *iface, IVisual *value )
++{
++    struct desktop_window_target *impl = impl_from_ICompositionTarget( iface );
++
++    TRACE( "iface %p, value %p.\n", iface, value );
++
++    if (value) IVisual_AddRef( value );
++    if (impl->root) IVisual_Release( impl->root );
++    impl->root = value;
++
++    /* Nothing walks the visual tree yet, so the window stays as whatever else
++     * drew to it. */
++    FIXME( "Visual tree for window %p is not composited.\n", impl->hwnd );
++    return S_OK;
++}
++
++static const struct ICompositionTargetVtbl composition_target_vtbl =
++{
++    composition_target_QueryInterface,
++    composition_target_AddRef,
++    composition_target_Release,
++    /* IInspectable methods */
++    composition_target_GetIids,
++    composition_target_GetRuntimeClassName,
++    composition_target_GetTrustLevel,
++    /* ICompositionTarget methods */
++    composition_target_get_Root,
++    composition_target_put_Root,
++};
++
++
++DEFINE_IINSPECTABLE( desktop_window_target_closable, IClosable, struct desktop_window_target, IDesktopWindowTarget_iface )
++
++static HRESULT WINAPI desktop_window_target_closable_Close( IClosable *iface )
++{
++    struct desktop_window_target *impl = impl_from_IClosable( iface );
++    IVisual *root;
++
++    TRACE( "iface %p.\n", iface );
++
++    root = impl->root;
++    impl->root = NULL;
++    if (root) IVisual_Release( root );
++
++    return S_OK;
++}
++
++static const struct IClosableVtbl desktop_window_target_closable_vtbl =
++{
++    desktop_window_target_closable_QueryInterface,
++    desktop_window_target_closable_AddRef,
++    desktop_window_target_closable_Release,
++    /* IInspectable methods */
++    desktop_window_target_closable_GetIids,
++    desktop_window_target_closable_GetRuntimeClassName,
++    desktop_window_target_closable_GetTrustLevel,
++    /* IClosable methods */
++    desktop_window_target_closable_Close,
++};
++
++static HRESULT desktop_window_target_create( HWND hwnd, BOOL topmost, IDesktopWindowTarget **out )
++{
++    struct desktop_window_target *impl;
++
++    if (!(impl = calloc( 1, sizeof(*impl) )))
++        return E_OUTOFMEMORY;
++
++    impl->IDesktopWindowTarget_iface.lpVtbl = &desktop_window_target_vtbl;
++    impl->ICompositionTarget_iface.lpVtbl = &composition_target_vtbl;
++    impl->IClosable_iface.lpVtbl = &desktop_window_target_closable_vtbl;
++    impl->ref = 1;
++    impl->hwnd = hwnd;
++    impl->topmost = !!topmost;
++
++    *out = &impl->IDesktopWindowTarget_iface;
++
++    return S_OK;
++}
++
 +struct compositor
 +{
 +    __x_ABI_CWindows_CUI_CComposition_CICompositor ICompositor_iface;
++    ICompositorDesktopInterop ICompositorDesktopInterop_iface;
 +    LONG ref;
 +    /* The controller this compositor belongs to. An application can ask a
 +     * compositor for its controller, so keep a way back. */
@@ -81,6 +295,13 @@ index 2744d758e91..bbfe13bcd07 100644
 +    {
 +        IUnknown_AddRef( iface );
 +        *out = &impl->ICompositor_iface;
++        return S_OK;
++    }
++
++    if (IsEqualGUID( iid, &IID_ICompositorDesktopInterop ))
++    {
++        __x_ABI_CWindows_CUI_CComposition_CICompositor_AddRef( iface );
++        *out = &impl->ICompositorDesktopInterop_iface;
 +        return S_OK;
 +    }
 +
@@ -305,6 +526,57 @@ index 2744d758e91..bbfe13bcd07 100644
 +    compositor_GetCommitBatch,
 +};
 +
++
++static inline struct compositor *impl_from_ICompositorDesktopInterop( ICompositorDesktopInterop *iface )
++{
++    return CONTAINING_RECORD( iface, struct compositor, ICompositorDesktopInterop_iface );
++}
++
++static HRESULT WINAPI compositor_desktop_interop_QueryInterface( ICompositorDesktopInterop *iface, REFIID iid, void **out )
++{
++    struct compositor *impl = impl_from_ICompositorDesktopInterop( iface );
++    return __x_ABI_CWindows_CUI_CComposition_CICompositor_QueryInterface( &impl->ICompositor_iface, iid, out );
++}
++
++static ULONG WINAPI compositor_desktop_interop_AddRef( ICompositorDesktopInterop *iface )
++{
++    struct compositor *impl = impl_from_ICompositorDesktopInterop( iface );
++    return __x_ABI_CWindows_CUI_CComposition_CICompositor_AddRef( &impl->ICompositor_iface );
++}
++
++static ULONG WINAPI compositor_desktop_interop_Release( ICompositorDesktopInterop *iface )
++{
++    struct compositor *impl = impl_from_ICompositorDesktopInterop( iface );
++    return __x_ABI_CWindows_CUI_CComposition_CICompositor_Release( &impl->ICompositor_iface );
++}
++
++static HRESULT WINAPI compositor_desktop_interop_CreateDesktopWindowTarget( ICompositorDesktopInterop *iface,
++        HWND hwnd, BOOL topmost, IDesktopWindowTarget **result )
++{
++    TRACE( "iface %p, hwnd %p, topmost %d, result %p.\n", iface, hwnd, topmost, result );
++
++    if (!result) return E_POINTER;
++    if (!IsWindow( hwnd )) return E_INVALIDARG;
++
++    return desktop_window_target_create( hwnd, topmost, result );
++}
++
++static HRESULT WINAPI compositor_desktop_interop_EnsureOnThread( ICompositorDesktopInterop *iface, DWORD thread_id )
++{
++    FIXME( "iface %p, thread_id %#lx stub.\n", iface, thread_id );
++    return S_OK;
++}
++
++static const struct ICompositorDesktopInteropVtbl compositor_desktop_interop_vtbl =
++{
++    compositor_desktop_interop_QueryInterface,
++    compositor_desktop_interop_AddRef,
++    compositor_desktop_interop_Release,
++    /* ICompositorDesktopInterop methods */
++    compositor_desktop_interop_CreateDesktopWindowTarget,
++    compositor_desktop_interop_EnsureOnThread,
++};
++
 +static HRESULT compositor_create( ICompositorController *controller,
 +        __x_ABI_CWindows_CUI_CComposition_CICompositor **out )
 +{
@@ -314,6 +586,7 @@ index 2744d758e91..bbfe13bcd07 100644
 +        return E_OUTOFMEMORY;
 +
 +    impl->ICompositor_iface.lpVtbl = &compositor_vtbl;
++    impl->ICompositorDesktopInterop_iface.lpVtbl = &compositor_desktop_interop_vtbl;
 +    impl->ref = 1;
 +    /* Weak: the controller owns the compositor for as long as it lives. */
 +    impl->controller = controller;

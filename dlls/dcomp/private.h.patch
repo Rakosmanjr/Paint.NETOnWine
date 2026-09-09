@@ -1,9 +1,9 @@
 diff --git a/dlls/dcomp/private.h b/dlls/dcomp/private.h
 new file mode 100644
-index 00000000000..9bf75da942a
+index 00000000000..6b02b297683
 --- /dev/null
 +++ b/dlls/dcomp/private.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,76 @@
 +#ifndef __WINE_DCOMP_PRIVATE_H
 +#define __WINE_DCOMP_PRIVATE_H
 +
@@ -23,10 +23,18 @@ index 00000000000..9bf75da942a
 +#include "unknwn.h"
 +#include "dxgi.h"
 +
-+#define WIDL_using_Windows_UI_Composition_Core
-+#include "windows.ui.composition.core.h"
++/* Define every namespace before the first include: these headers import each
++ * other, and a namespace only gets short names if its macro is set when its
++ * header is first reached. */
 +#define WIDL_using_Windows_UI_Composition
++#define WIDL_using_Windows_UI_Composition_Core
++#define WIDL_using_Windows_UI_Composition_Desktop
++#define WIDL_using_Windows_Foundation
++#include "windows.foundation.h"
++#include "windows.ui.composition.core.h"
 +#include "windows.ui.composition.h"
++#include "windows.ui.composition.desktop.h"
++#include "windows.ui.composition.interop.h"
 +
 +#include "initguid.h"
 +
