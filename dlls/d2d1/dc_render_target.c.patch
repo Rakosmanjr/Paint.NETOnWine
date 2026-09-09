@@ -1,0 +1,60 @@
+diff --git a/dlls/d2d1/dc_render_target.c b/dlls/d2d1/dc_render_target.c
+index b09b77ff788..0a08fef1523 100644
+--- a/dlls/d2d1/dc_render_target.c
++++ b/dlls/d2d1/dc_render_target.c
+@@ -26,6 +26,25 @@ static inline struct d2d_dc_render_target *impl_from_IUnknown(IUnknown *iface)
+     return CONTAINING_RECORD(iface, struct d2d_dc_render_target, ID2D1DCRenderTarget_iface);
+ }
+ 
++/* Bring what is already on the device context into the surface, so that
++ * anything left undrawn still ends up back on it unchanged. */
++static void d2d_dc_render_target_begin_draw(IUnknown *outer_unknown)
++{
++    struct d2d_dc_render_target *render_target = impl_from_IUnknown(outer_unknown);
++    const RECT *dst_rect = &render_target->dst_rect;
++    HDC hdc;
++
++    if (!render_target->dxgi_surface)
++        return;
++
++    if (SUCCEEDED(IDXGISurface1_GetDC(render_target->dxgi_surface, TRUE, &hdc)))
++    {
++        BitBlt(hdc, 0, 0, dst_rect->right - dst_rect->left, dst_rect->bottom - dst_rect->top,
++                render_target->hdc, dst_rect->left, dst_rect->top, SRCCOPY);
++        IDXGISurface1_ReleaseDC(render_target->dxgi_surface, NULL);
++    }
++}
++
+ static HRESULT d2d_dc_render_target_present(IUnknown *outer_unknown)
+ {
+     struct d2d_dc_render_target *render_target = impl_from_IUnknown(outer_unknown);
+@@ -586,21 +605,9 @@ static void STDMETHODCALLTYPE d2d_dc_render_target_Clear(ID2D1DCRenderTarget *if
+ static void STDMETHODCALLTYPE d2d_dc_render_target_BeginDraw(ID2D1DCRenderTarget *iface)
+ {
+     struct d2d_dc_render_target *render_target = impl_from_ID2D1DCRenderTarget(iface);
+-    const RECT *dst_rect = &render_target->dst_rect;
+-    HDC hdc;
+ 
+     TRACE("iface %p.\n", iface);
+ 
+-    if (render_target->dxgi_surface)
+-    {
+-        if (SUCCEEDED(IDXGISurface1_GetDC(render_target->dxgi_surface, TRUE, &hdc)))
+-        {
+-            BitBlt(hdc, 0, 0, dst_rect->right - dst_rect->left, dst_rect->bottom - dst_rect->top,
+-                    render_target->hdc, dst_rect->left, dst_rect->top, SRCCOPY);
+-            IDXGISurface1_ReleaseDC(render_target->dxgi_surface, NULL);
+-        }
+-    }
+-
+     ID2D1RenderTarget_BeginDraw(render_target->dxgi_target);
+ }
+ 
+@@ -831,6 +838,7 @@ static const struct ID2D1DCRenderTargetVtbl d2d_dc_render_target_vtbl =
+ 
+ static const struct d2d_device_context_ops d2d_dc_render_target_ops =
+ {
++    d2d_dc_render_target_begin_draw,
+     d2d_dc_render_target_present,
+ };
+ 

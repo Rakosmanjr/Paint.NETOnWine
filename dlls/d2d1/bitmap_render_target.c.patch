@@ -1,0 +1,12 @@
+diff --git a/dlls/d2d1/bitmap_render_target.c b/dlls/d2d1/bitmap_render_target.c
+index ce8b8965d39..16f3522e944 100644
+--- a/dlls/d2d1/bitmap_render_target.c
++++ b/dlls/d2d1/bitmap_render_target.c
+@@ -723,6 +723,7 @@ static const struct ID2D1BitmapRenderTargetVtbl d2d_bitmap_render_target_vtbl =
+ static const struct d2d_device_context_ops d2d_bitmap_render_target_ops =
+ {
+     NULL,
++    NULL,
+ };
+ 
+ HRESULT d2d_bitmap_render_target_init(struct d2d_bitmap_render_target *render_target,
