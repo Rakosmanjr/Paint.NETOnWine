@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..a5ae051f248 100644
+index 2744d758e91..db265d9b457 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,13 +15,27 @@
@@ -30,7 +30,7 @@ index 2744d758e91..a5ae051f248 100644
  
  WINE_DEFAULT_DEBUG_CHANNEL(dcomp);
  
-@@ -45,3 +59,449 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +59,472 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -323,7 +323,19 @@ index 2744d758e91..a5ae051f248 100644
 +{
 +    ICompositorController ICompositorController_iface;
 +    LONG ref;
++
++    /* A controller always hands out the same compositor, created on demand. */
++    __x_ABI_CWindows_CUI_CComposition_CICompositor *compositor;
 +};
++
++static CRITICAL_SECTION compositor_controller_cs;
++static CRITICAL_SECTION_DEBUG compositor_controller_cs_debug =
++{
++    0, 0, &compositor_controller_cs,
++    { &compositor_controller_cs_debug.ProcessLocksList, &compositor_controller_cs_debug.ProcessLocksList },
++    0, 0, { (DWORD_PTR)(__FILE__ ": compositor_controller_cs") }
++};
++static CRITICAL_SECTION compositor_controller_cs = { &compositor_controller_cs_debug, -1, 0, 0, 0, 0 };
 +
 +static inline struct compositor_controller *impl_from_ICompositorController( ICompositorController *iface )
 +{
@@ -391,8 +403,19 @@ index 2744d758e91..a5ae051f248 100644
 +static HRESULT WINAPI compositor_controller_get_Compositor( ICompositorController *iface, __x_ABI_CWindows_CUI_CComposition_CICompositor **value )
 +{
 +    struct compositor_controller *impl = impl_from_ICompositorController( iface );
-+    TRACE( "STUB iface %p. \n", iface);
-+    return compositor_create( iface, value );
++    HRESULT hr = S_OK;
++
++    TRACE( "iface %p, value %p.\n", iface, value );
++
++    if (!value) return E_POINTER;
++
++    EnterCriticalSection( &compositor_controller_cs );
++    if (!impl->compositor) hr = compositor_create( iface, &impl->compositor );
++    if (SUCCEEDED(hr)) __x_ABI_CWindows_CUI_CComposition_CICompositor_AddRef( impl->compositor );
++    *value = impl->compositor;
++    LeaveCriticalSection( &compositor_controller_cs );
++
++    return hr;
 +}
 +
 +static HRESULT WINAPI compositor_controller_Commit( ICompositorController *iface )
