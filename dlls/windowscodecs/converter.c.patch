@@ -1,0 +1,75 @@
+diff --git a/dlls/windowscodecs/converter.c b/dlls/windowscodecs/converter.c
+index 356c80a5e40..eca965e2d9e 100644
+--- a/dlls/windowscodecs/converter.c
++++ b/dlls/windowscodecs/converter.c
+@@ -995,6 +995,70 @@ static HRESULT copypixels_to_32bppBGRA(struct FormatConverter *This, const WICRe
+             return res;
+         }
+         return S_OK;
++    case format_128bppPRGBAFloat:
++        if (prc)
++        {
++            HRESULT res;
++            INT x, y;
++            BYTE *srcdata;
++            UINT srcstride, srcdatasize;
++            const BYTE *srcrow;
++            const float *srcpixel;
++            BYTE *dstrow;
++            DWORD *dstpixel;
++
++            srcstride = 16 * prc->Width;
++            srcdatasize = srcstride * prc->Height;
++
++            srcdata = malloc(srcdatasize);
++            if (!srcdata) return E_OUTOFMEMORY;
++
++            res = IWICBitmapSource_CopyPixels(This->source, prc, srcstride, srcdatasize, srcdata);
++
++            if (SUCCEEDED(res))
++            {
++                srcrow = srcdata;
++                dstrow = pbBuffer;
++                for (y = 0; y < prc->Height; y++)
++                {
++                    srcpixel = (const float *)srcrow;
++                    dstpixel = (DWORD *)dstrow;
++                    for (x = 0; x < prc->Width; x++)
++                    {
++                        BYTE red, green, blue, alpha;
++                        float r, g, b, a;
++
++                        r = *srcpixel++;
++                        g = *srcpixel++;
++                        b = *srcpixel++;
++                        a = *srcpixel++;
++
++                        /* The colour carries the alpha; this format does not. */
++                        if (a > 0.0f)
++                        {
++                            r /= a;
++                            g /= a;
++                            b /= a;
++                        }
++                        else r = g = b = 0.0f;
++
++                        red   = (BYTE)floorf(to_sRGB_component(r) * 255.0f + 0.51f);
++                        green = (BYTE)floorf(to_sRGB_component(g) * 255.0f + 0.51f);
++                        blue  = (BYTE)floorf(to_sRGB_component(b) * 255.0f + 0.51f);
++                        alpha = (BYTE)floorf(a * 255.0f + 0.51f);
++
++                        *dstpixel++ = alpha << 24 | red << 16 | green << 8 | blue;
++                    }
++                    srcrow += srcstride;
++                    dstrow += cbStride;
++                }
++            }
++
++            free(srcdata);
++
++            return res;
++        }
++        return S_OK;
+     case format_16bppGrayHalf:
+         if (prc)
+         {

@@ -1,0 +1,25 @@
+diff --git a/dlls/windowscodecs/tests/converter.c b/dlls/windowscodecs/tests/converter.c
+index b1d14614d64..d939fafa254 100644
+--- a/dlls/windowscodecs/tests/converter.c
++++ b/dlls/windowscodecs/tests/converter.c
+@@ -823,6 +823,12 @@ static const float bits_128bppPRGBAFloat[] = {
+ static const struct bitmap_data testdata_128bppPRGBAFloat = {
+     &GUID_WICPixelFormat128bppPRGBAFloat, 128, (const BYTE *)bits_128bppPRGBAFloat, 3, 2, 96.0, 96.0};
+ 
++static const BYTE bits_32bppBGRA_5[] = {
++    0,0,0,0, 0,255,0,136, 0,0,255,255,
++    125,255,0,255, 0,125,0,255, 0,0,125,128};
++static const struct bitmap_data testdata_32bppBGRA_5 = {
++    &GUID_WICPixelFormat32bppBGRA, 32, bits_32bppBGRA_5, 3, 2, 96.0, 96.0};
++
+ static void test_conversion(const struct bitmap_data *src, const struct bitmap_data *dst, const char *name, BOOL todo)
+ {
+     BitmapTestSrc *src_obj;
+@@ -2467,6 +2473,7 @@ START_TEST(converter)
+     test_conversion(&testdata_128bppRGBAFloat_2, &testdata_32bppBGRA_2, "128bppRGBAFloat -> 32bppBGRA", FALSE);
+ 
+     test_conversion(&testdata_64bppPRGBA_2, &testdata_128bppPRGBAFloat, "64bppPRGBA -> 128bppPRGBAFloat", FALSE);
++    test_conversion(&testdata_128bppPRGBAFloat, &testdata_32bppBGRA_5, "128bppPRGBAFloat -> 32bppBGRA", FALSE);
+ 
+     test_conversion(&testdata_48bppRGBHalf, &testdata_32bppBGRA_3, "48bppRGBHalf -> 32bppBGRA", FALSE);
+     test_conversion(&testdata_48bppRGBHalf, &testdata_128bppRGBFloat_2, "48bppRGBHalf -> 128bppRGBFloat", FALSE);
