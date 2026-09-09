@@ -1,5 +1,5 @@
 diff --git a/dlls/windowscodecs/converter.c b/dlls/windowscodecs/converter.c
-index 356c80a5e40..eca965e2d9e 100644
+index 356c80a5e40..3476031e5bb 100644
 --- a/dlls/windowscodecs/converter.c
 +++ b/dlls/windowscodecs/converter.c
 @@ -995,6 +995,70 @@ static HRESULT copypixels_to_32bppBGRA(struct FormatConverter *This, const WICRe
@@ -73,3 +73,72 @@ index 356c80a5e40..eca965e2d9e 100644
      case format_16bppGrayHalf:
          if (prc)
          {
+@@ -2396,6 +2460,60 @@ static HRESULT copypixels_to_128bppRGBAFloat(struct FormatConverter *This, const
+         free(srcdata);
+         return hr;
+     }
++    case format_32bppPBGRA:
++    {
++        UINT srcstride, srcdatasize;
++        const BYTE *srcpixel;
++        const BYTE *srcrow;
++        float *dstpixel;
++        BYTE *srcdata;
++        BYTE *dstrow;
++        INT x, y;
++
++        if (!prc)
++            return S_OK;
++
++        srcstride = 4 * prc->Width;
++        srcdatasize = srcstride * prc->Height;
++
++        srcdata = malloc(srcdatasize);
++        if (!srcdata) return E_OUTOFMEMORY;
++
++        hr = IWICBitmapSource_CopyPixels(This->source, prc, srcstride, srcdatasize, srcdata);
++        if (SUCCEEDED(hr))
++        {
++            srcrow = srcdata;
++            dstrow = pbBuffer;
++            for (y = 0; y < prc->Height; y++)
++            {
++                srcpixel = srcrow;
++                dstpixel= (float *)dstrow;
++                for (x = 0; x < prc->Width; x++)
++                {
++                    BYTE alpha = srcpixel[3];
++
++                    /* The colour carries the alpha, and does so in sRGB, so
++                     * divide it back out before leaving that space. */
++                    if (alpha)
++                    {
++                        dstpixel[2] = from_sRGB_component(srcpixel[0] / (float)alpha);
++                        dstpixel[1] = from_sRGB_component(srcpixel[1] / (float)alpha);
++                        dstpixel[0] = from_sRGB_component(srcpixel[2] / (float)alpha);
++                    }
++                    else dstpixel[0] = dstpixel[1] = dstpixel[2] = 0.0f;
++                    dstpixel[3] = alpha / 255.0f;
++
++                    srcpixel += 4;
++                    dstpixel += 4;
++                }
++                srcrow += srcstride;
++                dstrow += cbStride;
++            }
++        }
++
++        free(srcdata);
++        return hr;
++    }
+     case format_64bppPRGBA:
+     {
+         UINT srcstride, srcdatasize;
+@@ -2468,6 +2586,7 @@ static HRESULT copypixels_to_128bppPRGBAFloat(struct FormatConverter *This, cons
+         if (prc)
+             return IWICBitmapSource_CopyPixels(This->source, prc, cbStride, cbBufferSize, pbBuffer);
+         return S_OK;
++    case format_32bppPBGRA:
+     case format_64bppPRGBA:
+         {
+             hr = copypixels_to_128bppRGBAFloat(This, prc, cbStride, cbBufferSize, pbBuffer, source_format);
