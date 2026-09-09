@@ -1,8 +1,8 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..b91bf6aeabb 100644
+index 2744d758e91..5d59618a264 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
-@@ -15,16 +15,34 @@
+@@ -15,16 +15,44 @@
   * License along with this library; if not, write to the Free Software
   * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA
   */
@@ -34,10 +34,20 @@ index 2744d758e91..b91bf6aeabb 100644
 +#define ICommitNeededHandler_AddRef __FITypedEventHandler_2_Windows__CUI__CComposition__CCore__CCompositorController_IInspectable_AddRef
 +#define ICommitNeededHandler_Release __FITypedEventHandler_2_Windows__CUI__CComposition__CCore__CCompositorController_IInspectable_Release
 +
++/* Guards the compositor cache, the CommitNeeded handlers and the target list. */
++static CRITICAL_SECTION compositor_controller_cs;
++static CRITICAL_SECTION_DEBUG compositor_controller_cs_debug =
++{
++    0, 0, &compositor_controller_cs,
++    { &compositor_controller_cs_debug.ProcessLocksList, &compositor_controller_cs_debug.ProcessLocksList },
++    0, 0, { (DWORD_PTR)(__FILE__ ": compositor_controller_cs") }
++};
++static CRITICAL_SECTION compositor_controller_cs = { &compositor_controller_cs_debug, -1, 0, 0, 0, 0 };
++
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +63,1357 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +73,1838 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -53,6 +63,411 @@ index 2744d758e91..b91bf6aeabb 100644
 + * different interface with a different vtable, so any call through it
 + * dispatched on the wrong slot.
 + */
++
++
++/* A composition surface wrapping content an application produced elsewhere,
++ * most often the back buffer of a composition swap chain. */
++struct composition_surface
++{
++    ICompositionSurface ICompositionSurface_iface;
++    IClosable IClosable_iface;
++    LONG ref;
++
++    IUnknown *content;
++};
++
++static inline struct composition_surface *impl_from_ICompositionSurface( ICompositionSurface *iface )
++{
++    return CONTAINING_RECORD( iface, struct composition_surface, ICompositionSurface_iface );
++}
++
++static HRESULT WINAPI composition_surface_QueryInterface( ICompositionSurface *iface, REFIID iid, void **out )
++{
++    struct composition_surface *impl = impl_from_ICompositionSurface( iface );
++
++    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
++
++    if (IsEqualGUID( iid, &IID_IUnknown ) ||
++        IsEqualGUID( iid, &IID_IInspectable ) ||
++        IsEqualGUID( iid, &IID_IAgileObject ) ||
++        IsEqualGUID( iid, &IID_ICompositionSurface ))
++        *out = &impl->ICompositionSurface_iface;
++    else if (IsEqualGUID( iid, &IID_IClosable ))
++        *out = &impl->IClosable_iface;
++    else
++    {
++        FIXME( "%s not implemented.\n", debugstr_guid( iid ) );
++        *out = NULL;
++        return E_NOINTERFACE;
++    }
++
++    IUnknown_AddRef( (IUnknown *)*out );
++    return S_OK;
++}
++
++static ULONG WINAPI composition_surface_AddRef( ICompositionSurface *iface )
++{
++    struct composition_surface *impl = impl_from_ICompositionSurface( iface );
++    ULONG ref = InterlockedIncrement( &impl->ref );
++    TRACE( "iface %p increasing refcount to %lu.\n", iface, ref );
++    return ref;
++}
++
++static ULONG WINAPI composition_surface_Release( ICompositionSurface *iface )
++{
++    struct composition_surface *impl = impl_from_ICompositionSurface( iface );
++    ULONG ref = InterlockedDecrement( &impl->ref );
++
++    TRACE( "iface %p decreasing refcount to %lu.\n", iface, ref );
++
++    if (!ref)
++    {
++        if (impl->content) IUnknown_Release( impl->content );
++        free( impl );
++    }
++
++    return ref;
++}
++
++static HRESULT WINAPI composition_surface_GetIids( ICompositionSurface *iface, ULONG *iid_count, IID **iids )
++{
++    FIXME( "iface %p, iid_count %p, iids %p stub.\n", iface, iid_count, iids );
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI composition_surface_GetRuntimeClassName( ICompositionSurface *iface, HSTRING *class_name )
++{
++    TRACE( "iface %p, class_name %p.\n", iface, class_name );
++    return WindowsCreateString( RuntimeClass_Windows_UI_Composition_CompositionSurfaceBrush,
++                                ARRAY_SIZE(RuntimeClass_Windows_UI_Composition_CompositionSurfaceBrush) - 1,
++                                class_name );
++}
++
++static HRESULT WINAPI composition_surface_GetTrustLevel( ICompositionSurface *iface, TrustLevel *trust_level )
++{
++    TRACE( "iface %p, trust_level %p.\n", iface, trust_level );
++    *trust_level = BaseTrust;
++    return S_OK;
++}
++
++static const struct ICompositionSurfaceVtbl composition_surface_vtbl =
++{
++    composition_surface_QueryInterface,
++    composition_surface_AddRef,
++    composition_surface_Release,
++    /* IInspectable methods */
++    composition_surface_GetIids,
++    composition_surface_GetRuntimeClassName,
++    composition_surface_GetTrustLevel,
++};
++
++DEFINE_IINSPECTABLE_( composition_surface_closable, IClosable, struct composition_surface,
++                      impl_from_surface_IClosable, IClosable_iface, &impl->ICompositionSurface_iface )
++
++static HRESULT WINAPI composition_surface_closable_Close( IClosable *iface )
++{
++    struct composition_surface *impl = impl_from_surface_IClosable( iface );
++    IUnknown *content;
++
++    TRACE( "iface %p.\n", iface );
++
++    content = impl->content;
++    impl->content = NULL;
++    if (content) IUnknown_Release( content );
++
++    return S_OK;
++}
++
++static const struct IClosableVtbl composition_surface_closable_vtbl =
++{
++    composition_surface_closable_QueryInterface,
++    composition_surface_closable_AddRef,
++    composition_surface_closable_Release,
++    /* IInspectable methods */
++    composition_surface_closable_GetIids,
++    composition_surface_closable_GetRuntimeClassName,
++    composition_surface_closable_GetTrustLevel,
++    /* IClosable methods */
++    composition_surface_closable_Close,
++};
++
++static HRESULT composition_surface_create( IUnknown *content, ICompositionSurface **out )
++{
++    struct composition_surface *impl;
++
++    if (!(impl = calloc( 1, sizeof(*impl) )))
++        return E_OUTOFMEMORY;
++
++    impl->ICompositionSurface_iface.lpVtbl = &composition_surface_vtbl;
++    impl->IClosable_iface.lpVtbl = &composition_surface_closable_vtbl;
++    impl->ref = 1;
++    if ((impl->content = content)) IUnknown_AddRef( content );
++
++    *out = &impl->ICompositionSurface_iface;
++
++    return S_OK;
++}
++
++/* A brush painting a visual with the contents of a composition surface. */
++struct surface_brush
++{
++    ICompositionSurfaceBrush ICompositionSurfaceBrush_iface;
++    ICompositionBrush ICompositionBrush_iface;
++    IClosable IClosable_iface;
++    LONG ref;
++
++    CompositionBitmapInterpolationMode bitmap_interpolation_mode;
++    FLOAT horizontal_alignment_ratio;
++    CompositionStretch stretch;
++    ICompositionSurface *surface;
++    FLOAT vertical_alignment_ratio;
++};
++
++static inline struct surface_brush *impl_from_ICompositionSurfaceBrush( ICompositionSurfaceBrush *iface )
++{
++    return CONTAINING_RECORD( iface, struct surface_brush, ICompositionSurfaceBrush_iface );
++}
++
++static HRESULT WINAPI surface_brush_QueryInterface( ICompositionSurfaceBrush *iface, REFIID iid, void **out )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++
++    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
++
++    if (IsEqualGUID( iid, &IID_IUnknown ) ||
++        IsEqualGUID( iid, &IID_IInspectable ) ||
++        IsEqualGUID( iid, &IID_IAgileObject ) ||
++        IsEqualGUID( iid, &IID_ICompositionSurfaceBrush ))
++        *out = &impl->ICompositionSurfaceBrush_iface;
++    else if (IsEqualGUID( iid, &IID_ICompositionBrush ))
++        *out = &impl->ICompositionBrush_iface;
++    else if (IsEqualGUID( iid, &IID_IClosable ))
++        *out = &impl->IClosable_iface;
++    else
++    {
++        FIXME( "%s not implemented.\n", debugstr_guid( iid ) );
++        *out = NULL;
++        return E_NOINTERFACE;
++    }
++
++    IUnknown_AddRef( (IUnknown *)*out );
++    return S_OK;
++}
++
++static ULONG WINAPI surface_brush_AddRef( ICompositionSurfaceBrush *iface )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    ULONG ref = InterlockedIncrement( &impl->ref );
++    TRACE( "iface %p increasing refcount to %lu.\n", iface, ref );
++    return ref;
++}
++
++static ULONG WINAPI surface_brush_Release( ICompositionSurfaceBrush *iface )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    ULONG ref = InterlockedDecrement( &impl->ref );
++
++    TRACE( "iface %p decreasing refcount to %lu.\n", iface, ref );
++
++    if (!ref)
++    {
++        if (impl->surface) ICompositionSurface_Release( impl->surface );
++        free( impl );
++    }
++
++    return ref;
++}
++
++static HRESULT WINAPI surface_brush_GetIids( ICompositionSurfaceBrush *iface, ULONG *iid_count, IID **iids )
++{
++    FIXME( "iface %p, iid_count %p, iids %p stub.\n", iface, iid_count, iids );
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI surface_brush_GetRuntimeClassName( ICompositionSurfaceBrush *iface, HSTRING *class_name )
++{
++    TRACE( "iface %p, class_name %p.\n", iface, class_name );
++    return WindowsCreateString( RuntimeClass_Windows_UI_Composition_CompositionSurfaceBrush,
++                                ARRAY_SIZE(RuntimeClass_Windows_UI_Composition_CompositionSurfaceBrush) - 1,
++                                class_name );
++}
++
++static HRESULT WINAPI surface_brush_GetTrustLevel( ICompositionSurfaceBrush *iface, TrustLevel *trust_level )
++{
++    TRACE( "iface %p, trust_level %p.\n", iface, trust_level );
++    *trust_level = BaseTrust;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_get_BitmapInterpolationMode( ICompositionSurfaceBrush *iface, CompositionBitmapInterpolationMode *value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->bitmap_interpolation_mode;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_put_BitmapInterpolationMode( ICompositionSurfaceBrush *iface, CompositionBitmapInterpolationMode value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->bitmap_interpolation_mode = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_get_HorizontalAlignmentRatio( ICompositionSurfaceBrush *iface, FLOAT *value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->horizontal_alignment_ratio;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_put_HorizontalAlignmentRatio( ICompositionSurfaceBrush *iface, FLOAT value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->horizontal_alignment_ratio = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_get_Stretch( ICompositionSurfaceBrush *iface, CompositionStretch *value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->stretch;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_put_Stretch( ICompositionSurfaceBrush *iface, CompositionStretch value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->stretch = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_get_Surface( ICompositionSurfaceBrush *iface, ICompositionSurface **value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    if ((*value = impl->surface)) ICompositionSurface_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_put_Surface( ICompositionSurfaceBrush *iface, ICompositionSurface *value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p.\n", iface );
++    if (value) ICompositionSurface_AddRef( value );
++    if (impl->surface) ICompositionSurface_Release( impl->surface );
++    impl->surface = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_get_VerticalAlignmentRatio( ICompositionSurfaceBrush *iface, FLOAT *value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->vertical_alignment_ratio;
++    return S_OK;
++}
++
++static HRESULT WINAPI surface_brush_put_VerticalAlignmentRatio( ICompositionSurfaceBrush *iface, FLOAT value )
++{
++    struct surface_brush *impl = impl_from_ICompositionSurfaceBrush( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->vertical_alignment_ratio = value;
++    return S_OK;
++}
++
++static const struct ICompositionSurfaceBrushVtbl surface_brush_vtbl =
++{
++    surface_brush_QueryInterface,
++    surface_brush_AddRef,
++    surface_brush_Release,
++    surface_brush_GetIids,
++    surface_brush_GetRuntimeClassName,
++    surface_brush_GetTrustLevel,
++    surface_brush_get_BitmapInterpolationMode,
++    surface_brush_put_BitmapInterpolationMode,
++    surface_brush_get_HorizontalAlignmentRatio,
++    surface_brush_put_HorizontalAlignmentRatio,
++    surface_brush_get_Stretch,
++    surface_brush_put_Stretch,
++    surface_brush_get_Surface,
++    surface_brush_put_Surface,
++    surface_brush_get_VerticalAlignmentRatio,
++    surface_brush_put_VerticalAlignmentRatio,
++};
++
++DEFINE_IINSPECTABLE_( composition_brush, ICompositionBrush, struct surface_brush,
++                      impl_from_ICompositionBrush, ICompositionBrush_iface, &impl->ICompositionSurfaceBrush_iface )
++
++static const struct ICompositionBrushVtbl composition_brush_vtbl =
++{
++    composition_brush_QueryInterface,
++    composition_brush_AddRef,
++    composition_brush_Release,
++    /* IInspectable methods */
++    composition_brush_GetIids,
++    composition_brush_GetRuntimeClassName,
++    composition_brush_GetTrustLevel,
++};
++
++DEFINE_IINSPECTABLE_( surface_brush_closable, IClosable, struct surface_brush,
++                      impl_from_brush_IClosable, IClosable_iface, &impl->ICompositionSurfaceBrush_iface )
++
++static HRESULT WINAPI surface_brush_closable_Close( IClosable *iface )
++{
++    struct surface_brush *impl = impl_from_brush_IClosable( iface );
++    ICompositionSurface *surface;
++
++    TRACE( "iface %p.\n", iface );
++
++    surface = impl->surface;
++    impl->surface = NULL;
++    if (surface) ICompositionSurface_Release( surface );
++
++    return S_OK;
++}
++
++static const struct IClosableVtbl surface_brush_closable_vtbl =
++{
++    surface_brush_closable_QueryInterface,
++    surface_brush_closable_AddRef,
++    surface_brush_closable_Release,
++    /* IInspectable methods */
++    surface_brush_closable_GetIids,
++    surface_brush_closable_GetRuntimeClassName,
++    surface_brush_closable_GetTrustLevel,
++    /* IClosable methods */
++    surface_brush_closable_Close,
++};
++
++static HRESULT surface_brush_create( ICompositionSurface *surface, ICompositionSurfaceBrush **out )
++{
++    struct surface_brush *impl;
++
++    if (!(impl = calloc( 1, sizeof(*impl) )))
++        return E_OUTOFMEMORY;
++
++    impl->ICompositionSurfaceBrush_iface.lpVtbl = &surface_brush_vtbl;
++    impl->ICompositionBrush_iface.lpVtbl = &composition_brush_vtbl;
++    impl->IClosable_iface.lpVtbl = &surface_brush_closable_vtbl;
++    impl->ref = 1;
++
++    /* A new surface brush fills the visual and centres its surface. */
++    impl->stretch = CompositionStretch_Fill;
++    impl->horizontal_alignment_ratio = 0.5f;
++    impl->vertical_alignment_ratio = 0.5f;
++
++    if ((impl->surface = surface)) ICompositionSurface_AddRef( surface );
++
++    *out = &impl->ICompositionSurfaceBrush_iface;
++
++    return S_OK;
++}
 +
 +/* A node in a composition visual tree. Everything an application can put in a
 + * tree shares the Visual surface, so one object covers the sprite case too. */
@@ -839,6 +1254,7 @@ index 2744d758e91..b91bf6aeabb 100644
 +{
 +    __x_ABI_CWindows_CUI_CComposition_CICompositor ICompositor_iface;
 +    ICompositorDesktopInterop ICompositorDesktopInterop_iface;
++    ICompositorInterop ICompositorInterop_iface;
 +    LONG ref;
 +    /* The controller this compositor belongs to. An application can ask a
 +     * compositor for its controller, so keep a way back. */
@@ -871,6 +1287,13 @@ index 2744d758e91..b91bf6aeabb 100644
 +    {
 +        __x_ABI_CWindows_CUI_CComposition_CICompositor_AddRef( iface );
 +        *out = &impl->ICompositorDesktopInterop_iface;
++        return S_OK;
++    }
++
++    if (IsEqualGUID( iid, &IID_ICompositorInterop ))
++    {
++        __x_ABI_CWindows_CUI_CComposition_CICompositor_AddRef( iface );
++        *out = &impl->ICompositorInterop_iface;
 +        return S_OK;
 +    }
 +
@@ -1024,14 +1447,20 @@ index 2744d758e91..b91bf6aeabb 100644
 +
 +static HRESULT WINAPI compositor_CreateSurfaceBrush( __x_ABI_CWindows_CUI_CComposition_CICompositor *iface, __x_ABI_CWindows_CUI_CComposition_CICompositionSurfaceBrush **result )
 +{
-+    FIXME( "iface %p stub.\n", iface );
-+    return E_NOTIMPL;
++    TRACE( "iface %p, result %p.\n", iface, result );
++
++    if (!result) return E_POINTER;
++
++    return surface_brush_create( NULL, result );
 +}
 +
 +static HRESULT WINAPI compositor_CreateSurfaceBrushWithSurface( __x_ABI_CWindows_CUI_CComposition_CICompositor *iface, __x_ABI_CWindows_CUI_CComposition_CICompositionSurface *surface, __x_ABI_CWindows_CUI_CComposition_CICompositionSurfaceBrush **result )
 +{
-+    FIXME( "iface %p stub.\n", iface );
-+    return E_NOTIMPL;
++    TRACE( "iface %p, surface %p, result %p.\n", iface, surface, result );
++
++    if (!result) return E_POINTER;
++
++    return surface_brush_create( surface, result );
 +}
 +
 +static HRESULT WINAPI compositor_CreateTargetForCurrentView( __x_ABI_CWindows_CUI_CComposition_CICompositor *iface, __x_ABI_CWindows_CUI_CComposition_CICompositionTarget **result )
@@ -1149,6 +1578,74 @@ index 2744d758e91..b91bf6aeabb 100644
 +    compositor_desktop_interop_EnsureOnThread,
 +};
 +
++
++static inline struct compositor *impl_from_ICompositorInterop( ICompositorInterop *iface )
++{
++    return CONTAINING_RECORD( iface, struct compositor, ICompositorInterop_iface );
++}
++
++static HRESULT WINAPI compositor_interop_QueryInterface( ICompositorInterop *iface, REFIID iid, void **out )
++{
++    struct compositor *impl = impl_from_ICompositorInterop( iface );
++    return __x_ABI_CWindows_CUI_CComposition_CICompositor_QueryInterface( &impl->ICompositor_iface, iid, out );
++}
++
++static ULONG WINAPI compositor_interop_AddRef( ICompositorInterop *iface )
++{
++    struct compositor *impl = impl_from_ICompositorInterop( iface );
++    return __x_ABI_CWindows_CUI_CComposition_CICompositor_AddRef( &impl->ICompositor_iface );
++}
++
++static ULONG WINAPI compositor_interop_Release( ICompositorInterop *iface )
++{
++    struct compositor *impl = impl_from_ICompositorInterop( iface );
++    return __x_ABI_CWindows_CUI_CComposition_CICompositor_Release( &impl->ICompositor_iface );
++}
++
++static HRESULT WINAPI compositor_interop_CreateCompositionSurfaceForHandle( ICompositorInterop *iface,
++        HANDLE handle, ICompositionSurface **result )
++{
++    FIXME( "iface %p, handle %p, result %p stub.\n", iface, handle, result );
++
++    if (!result) return E_POINTER;
++
++    *result = NULL;
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI compositor_interop_CreateCompositionSurfaceForSwapChain( ICompositorInterop *iface,
++        IUnknown *swapchain, ICompositionSurface **result )
++{
++    TRACE( "iface %p, swapchain %p, result %p.\n", iface, swapchain, result );
++
++    if (!result) return E_POINTER;
++    if (!swapchain) return E_INVALIDARG;
++
++    return composition_surface_create( swapchain, result );
++}
++
++static HRESULT WINAPI compositor_interop_CreateGraphicsDevice( ICompositorInterop *iface,
++        IUnknown *device, ICompositionGraphicsDevice **result )
++{
++    FIXME( "iface %p, device %p, result %p stub.\n", iface, device, result );
++
++    if (!result) return E_POINTER;
++
++    *result = NULL;
++    return E_NOTIMPL;
++}
++
++static const struct ICompositorInteropVtbl compositor_interop_vtbl =
++{
++    compositor_interop_QueryInterface,
++    compositor_interop_AddRef,
++    compositor_interop_Release,
++    /* ICompositorInterop methods */
++    compositor_interop_CreateCompositionSurfaceForHandle,
++    compositor_interop_CreateCompositionSurfaceForSwapChain,
++    compositor_interop_CreateGraphicsDevice,
++};
++
 +static HRESULT compositor_create( ICompositorController *controller,
 +        __x_ABI_CWindows_CUI_CComposition_CICompositor **out )
 +{
@@ -1159,6 +1656,7 @@ index 2744d758e91..b91bf6aeabb 100644
 +
 +    impl->ICompositor_iface.lpVtbl = &compositor_vtbl;
 +    impl->ICompositorDesktopInterop_iface.lpVtbl = &compositor_desktop_interop_vtbl;
++    impl->ICompositorInterop_iface.lpVtbl = &compositor_interop_vtbl;
 +    impl->ref = 1;
 +    /* Weak: the controller owns the compositor for as long as it lives. */
 +    impl->controller = controller;
@@ -1184,14 +1682,6 @@ index 2744d758e91..b91bf6aeabb 100644
 +    SIZE_T handler_count;
 +};
 +
-+static CRITICAL_SECTION compositor_controller_cs;
-+static CRITICAL_SECTION_DEBUG compositor_controller_cs_debug =
-+{
-+    0, 0, &compositor_controller_cs,
-+    { &compositor_controller_cs_debug.ProcessLocksList, &compositor_controller_cs_debug.ProcessLocksList },
-+    0, 0, { (DWORD_PTR)(__FILE__ ": compositor_controller_cs") }
-+};
-+static CRITICAL_SECTION compositor_controller_cs = { &compositor_controller_cs_debug, -1, 0, 0, 0, 0 };
 +
 +static inline struct compositor_controller *impl_from_ICompositorController( ICompositorController *iface )
 +{
@@ -1273,6 +1763,7 @@ index 2744d758e91..b91bf6aeabb 100644
 +
 +    return hr;
 +}
++
 +
 +static HRESULT WINAPI compositor_controller_Commit( ICompositorController *iface )
 +{
