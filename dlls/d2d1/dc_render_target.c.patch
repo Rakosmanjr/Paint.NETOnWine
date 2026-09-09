@@ -1,17 +1,55 @@
 diff --git a/dlls/d2d1/dc_render_target.c b/dlls/d2d1/dc_render_target.c
-index b09b77ff788..0a08fef1523 100644
+index b09b77ff788..bbd16437f2f 100644
 --- a/dlls/d2d1/dc_render_target.c
 +++ b/dlls/d2d1/dc_render_target.c
-@@ -26,6 +26,25 @@ static inline struct d2d_dc_render_target *impl_from_IUnknown(IUnknown *iface)
+@@ -26,6 +26,62 @@ static inline struct d2d_dc_render_target *impl_from_IUnknown(IUnknown *iface)
      return CONTAINING_RECORD(iface, struct d2d_dc_render_target, ID2D1DCRenderTarget_iface);
  }
  
-+/* Bring what is already on the device context into the surface, so that
-+ * anything left undrawn still ends up back on it unchanged. */
++/* Bring what is already on the destination into the surface, so that anything
++ * left undrawn still ends up back on the device context unchanged. When the
++ * copy is blended back, GDI has no alpha channel to give and the content
++ * would blend away. Mark it opaque: it stands for content that is already on
++ * the device context, and a target that ignores alpha is opaque anyway. */
++static void d2d_dc_render_target_copy_in(struct d2d_dc_render_target *render_target, HDC surface_hdc)
++{
++    const RECT *dst_rect = &render_target->dst_rect;
++    int i, w = dst_rect->right - dst_rect->left, h = dst_rect->bottom - dst_rect->top;
++    BITMAPINFO info = {{0}};
++    HBITMAP bitmap, prev;
++    DWORD *bits;
++    HDC hdc;
++
++    if (w <= 0 || h <= 0)
++        return;
++
++    if (!(hdc = CreateCompatibleDC(NULL)))
++        return;
++
++    info.bmiHeader.biSize = sizeof(info.bmiHeader);
++    info.bmiHeader.biWidth = w;
++    info.bmiHeader.biHeight = -h;
++    info.bmiHeader.biPlanes = 1;
++    info.bmiHeader.biBitCount = 32;
++    info.bmiHeader.biCompression = BI_RGB;
++
++    if ((bitmap = CreateDIBSection(hdc, &info, DIB_RGB_COLORS, (void **)&bits, NULL, 0)))
++    {
++        prev = SelectObject(hdc, bitmap);
++        BitBlt(hdc, 0, 0, w, h, render_target->hdc, dst_rect->left, dst_rect->top, SRCCOPY);
++        for (i = 0; i < w * h; ++i)
++            bits[i] |= 0xff000000;
++        BitBlt(surface_hdc, 0, 0, w, h, hdc, 0, 0, SRCCOPY);
++        SelectObject(hdc, prev);
++        DeleteObject(bitmap);
++    }
++
++    DeleteDC(hdc);
++}
++
 +static void d2d_dc_render_target_begin_draw(IUnknown *outer_unknown)
 +{
 +    struct d2d_dc_render_target *render_target = impl_from_IUnknown(outer_unknown);
-+    const RECT *dst_rect = &render_target->dst_rect;
 +    HDC hdc;
 +
 +    if (!render_target->dxgi_surface)
@@ -19,8 +57,7 @@ index b09b77ff788..0a08fef1523 100644
 +
 +    if (SUCCEEDED(IDXGISurface1_GetDC(render_target->dxgi_surface, TRUE, &hdc)))
 +    {
-+        BitBlt(hdc, 0, 0, dst_rect->right - dst_rect->left, dst_rect->bottom - dst_rect->top,
-+                render_target->hdc, dst_rect->left, dst_rect->top, SRCCOPY);
++        d2d_dc_render_target_copy_in(render_target, hdc);
 +        IDXGISurface1_ReleaseDC(render_target->dxgi_surface, NULL);
 +    }
 +}
@@ -28,7 +65,34 @@ index b09b77ff788..0a08fef1523 100644
  static HRESULT d2d_dc_render_target_present(IUnknown *outer_unknown)
  {
      struct d2d_dc_render_target *render_target = impl_from_IUnknown(outer_unknown);
-@@ -586,21 +605,9 @@ static void STDMETHODCALLTYPE d2d_dc_render_target_Clear(ID2D1DCRenderTarget *if
+@@ -43,8 +99,20 @@ static HRESULT d2d_dc_render_target_present(IUnknown *outer_unknown)
+         return S_OK;
+     }
+ 
+-    BitBlt(render_target->hdc, dst_rect->left, dst_rect->top, dst_rect->right - dst_rect->left,
+-            dst_rect->bottom - dst_rect->top, src_hdc, 0, 0, SRCCOPY);
++    if (render_target->desc.pixelFormat.alphaMode == D2D1_ALPHA_MODE_PREMULTIPLIED)
++    {
++        BLENDFUNCTION blend = {AC_SRC_OVER, 0, 0xff, AC_SRC_ALPHA};
++
++        GdiAlphaBlend(render_target->hdc, dst_rect->left, dst_rect->top,
++                dst_rect->right - dst_rect->left, dst_rect->bottom - dst_rect->top,
++                src_hdc, 0, 0, dst_rect->right - dst_rect->left,
++                dst_rect->bottom - dst_rect->top, blend);
++    }
++    else
++    {
++        BitBlt(render_target->hdc, dst_rect->left, dst_rect->top, dst_rect->right - dst_rect->left,
++                dst_rect->bottom - dst_rect->top, src_hdc, 0, 0, SRCCOPY);
++    }
+ 
+     SetRectEmpty(&empty_rect);
+     IDXGISurface1_ReleaseDC(render_target->dxgi_surface, &empty_rect);
+@@ -583,24 +651,13 @@ static void STDMETHODCALLTYPE d2d_dc_render_target_Clear(ID2D1DCRenderTarget *if
+     ID2D1RenderTarget_Clear(render_target->dxgi_target, color);
+ }
+ 
++
  static void STDMETHODCALLTYPE d2d_dc_render_target_BeginDraw(ID2D1DCRenderTarget *iface)
  {
      struct d2d_dc_render_target *render_target = impl_from_ID2D1DCRenderTarget(iface);
@@ -50,7 +114,7 @@ index b09b77ff788..0a08fef1523 100644
      ID2D1RenderTarget_BeginDraw(render_target->dxgi_target);
  }
  
-@@ -831,6 +838,7 @@ static const struct ID2D1DCRenderTargetVtbl d2d_dc_render_target_vtbl =
+@@ -831,6 +888,7 @@ static const struct ID2D1DCRenderTargetVtbl d2d_dc_render_target_vtbl =
  
  static const struct d2d_device_context_ops d2d_dc_render_target_ops =
  {
