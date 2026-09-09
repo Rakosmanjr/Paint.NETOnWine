@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..99d52918e8a 100644
+index 2744d758e91..b91bf6aeabb 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,16 +15,34 @@
@@ -37,7 +37,7 @@ index 2744d758e91..99d52918e8a 100644
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +63,785 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +63,1357 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -53,6 +53,575 @@ index 2744d758e91..99d52918e8a 100644
 + * different interface with a different vtable, so any call through it
 + * dispatched on the wrong slot.
 + */
++
++/* A node in a composition visual tree. Everything an application can put in a
++ * tree shares the Visual surface, so one object covers the sprite case too. */
++struct visual
++{
++    IVisual IVisual_iface;
++    ISpriteVisual ISpriteVisual_iface;
++    ICompositionObject ICompositionObject_iface;
++    IClosable IClosable_iface;
++    LONG ref;
++
++    Vector2 anchor_point;
++    CompositionBackfaceVisibility backface_visibility;
++    CompositionBorderMode border_mode;
++    Vector3 center_point;
++    ICompositionClip *clip;
++    CompositionCompositeMode composite_mode;
++    boolean is_visible;
++    Vector3 offset;
++    FLOAT opacity;
++    Quaternion orientation;
++    IContainerVisual *parent;
++    FLOAT rotation_angle;
++    FLOAT rotation_angle_in_degrees;
++    Vector3 rotation_axis;
++    Vector3 scale;
++    Vector2 size;
++    Matrix4x4 transform_matrix;
++
++    ICompositionBrush *brush;
++    ICompositor *compositor;
++    ICompositionPropertySet *properties;
++};
++
++static inline struct visual *impl_from_IVisual( IVisual *iface )
++{
++    return CONTAINING_RECORD( iface, struct visual, IVisual_iface );
++}
++
++static HRESULT WINAPI visual_QueryInterface( IVisual *iface, REFIID iid, void **out )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++
++    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
++
++    if (IsEqualGUID( iid, &IID_IUnknown ) ||
++        IsEqualGUID( iid, &IID_IInspectable ) ||
++        IsEqualGUID( iid, &IID_IAgileObject ) ||
++        IsEqualGUID( iid, &IID_IVisual ))
++        *out = &impl->IVisual_iface;
++    else if (IsEqualGUID( iid, &IID_ISpriteVisual ))
++        *out = &impl->ISpriteVisual_iface;
++    else if (IsEqualGUID( iid, &IID_ICompositionObject ))
++        *out = &impl->ICompositionObject_iface;
++    else if (IsEqualGUID( iid, &IID_IClosable ))
++        *out = &impl->IClosable_iface;
++    else
++    {
++        FIXME( "%s not implemented.\n", debugstr_guid( iid ) );
++        *out = NULL;
++        return E_NOINTERFACE;
++    }
++
++    IUnknown_AddRef( (IUnknown *)*out );
++    return S_OK;
++}
++
++static ULONG WINAPI visual_AddRef( IVisual *iface )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    ULONG ref = InterlockedIncrement( &impl->ref );
++    TRACE( "iface %p increasing refcount to %lu.\n", iface, ref );
++    return ref;
++}
++
++static void visual_detach( struct visual *impl )
++{
++    if (impl->brush) ICompositionBrush_Release( impl->brush );
++    if (impl->clip) ICompositionClip_Release( impl->clip );
++    if (impl->properties) ICompositionPropertySet_Release( impl->properties );
++    impl->brush = NULL;
++    impl->clip = NULL;
++    impl->properties = NULL;
++}
++
++static ULONG WINAPI visual_Release( IVisual *iface )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    ULONG ref = InterlockedDecrement( &impl->ref );
++
++    TRACE( "iface %p decreasing refcount to %lu.\n", iface, ref );
++
++    if (!ref)
++    {
++        visual_detach( impl );
++        if (impl->compositor) ICompositor_Release( impl->compositor );
++        free( impl );
++    }
++
++    return ref;
++}
++
++static HRESULT WINAPI visual_GetIids( IVisual *iface, ULONG *iid_count, IID **iids )
++{
++    FIXME( "iface %p, iid_count %p, iids %p stub.\n", iface, iid_count, iids );
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI visual_GetRuntimeClassName( IVisual *iface, HSTRING *class_name )
++{
++    TRACE( "iface %p, class_name %p.\n", iface, class_name );
++    return WindowsCreateString( RuntimeClass_Windows_UI_Composition_SpriteVisual,
++                                ARRAY_SIZE(RuntimeClass_Windows_UI_Composition_SpriteVisual) - 1,
++                                class_name );
++}
++
++static HRESULT WINAPI visual_GetTrustLevel( IVisual *iface, TrustLevel *trust_level )
++{
++    TRACE( "iface %p, trust_level %p.\n", iface, trust_level );
++    *trust_level = BaseTrust;
++    return S_OK;
++}
++
++DEFINE_IINSPECTABLE( sprite_visual, ISpriteVisual, struct visual, IVisual_iface )
++DEFINE_IINSPECTABLE( composition_object, ICompositionObject, struct visual, IVisual_iface )
++DEFINE_IINSPECTABLE_( visual_closable, IClosable, struct visual, impl_from_visual_IClosable, IClosable_iface, &impl->IVisual_iface )
++
++static HRESULT WINAPI visual_get_AnchorPoint( IVisual *iface, Vector2 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->anchor_point;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_AnchorPoint( IVisual *iface, Vector2 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->anchor_point = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_BackfaceVisibility( IVisual *iface, CompositionBackfaceVisibility *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->backface_visibility;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_BackfaceVisibility( IVisual *iface, CompositionBackfaceVisibility value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->backface_visibility = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_BorderMode( IVisual *iface, CompositionBorderMode *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->border_mode;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_BorderMode( IVisual *iface, CompositionBorderMode value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->border_mode = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_CenterPoint( IVisual *iface, Vector3 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->center_point;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_CenterPoint( IVisual *iface, Vector3 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->center_point = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Clip( IVisual *iface, ICompositionClip **value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    if ((*value = impl->clip)) ICompositionClip_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_Clip( IVisual *iface, ICompositionClip *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    if (value) ICompositionClip_AddRef( value );
++    if (impl->clip) ICompositionClip_Release( impl->clip );
++    impl->clip = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_CompositeMode( IVisual *iface, CompositionCompositeMode *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->composite_mode;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_CompositeMode( IVisual *iface, CompositionCompositeMode value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->composite_mode = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_IsVisible( IVisual *iface, boolean *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->is_visible;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_IsVisible( IVisual *iface, boolean value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->is_visible = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Offset( IVisual *iface, Vector3 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->offset;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_Offset( IVisual *iface, Vector3 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->offset = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Opacity( IVisual *iface, FLOAT *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->opacity;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_Opacity( IVisual *iface, FLOAT value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->opacity = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Orientation( IVisual *iface, Quaternion *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->orientation;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_Orientation( IVisual *iface, Quaternion value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->orientation = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Parent( IVisual *iface, IContainerVisual **value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    if ((*value = impl->parent)) IContainerVisual_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_RotationAngle( IVisual *iface, FLOAT *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->rotation_angle;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_RotationAngle( IVisual *iface, FLOAT value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->rotation_angle = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_RotationAngleInDegrees( IVisual *iface, FLOAT *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->rotation_angle_in_degrees;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_RotationAngleInDegrees( IVisual *iface, FLOAT value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->rotation_angle_in_degrees = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_RotationAxis( IVisual *iface, Vector3 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->rotation_axis;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_RotationAxis( IVisual *iface, Vector3 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->rotation_axis = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Scale( IVisual *iface, Vector3 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->scale;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_Scale( IVisual *iface, Vector3 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->scale = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_Size( IVisual *iface, Vector2 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->size;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_Size( IVisual *iface, Vector2 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->size = value;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_get_TransformMatrix( IVisual *iface, Matrix4x4 *value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    *value = impl->transform_matrix;
++    return S_OK;
++}
++
++static HRESULT WINAPI visual_put_TransformMatrix( IVisual *iface, Matrix4x4 value )
++{
++    struct visual *impl = impl_from_IVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    impl->transform_matrix = value;
++    return S_OK;
++}
++
++static const struct IVisualVtbl visual_vtbl =
++{
++    visual_QueryInterface,
++    visual_AddRef,
++    visual_Release,
++    visual_GetIids,
++    visual_GetRuntimeClassName,
++    visual_GetTrustLevel,
++    visual_get_AnchorPoint,
++    visual_put_AnchorPoint,
++    visual_get_BackfaceVisibility,
++    visual_put_BackfaceVisibility,
++    visual_get_BorderMode,
++    visual_put_BorderMode,
++    visual_get_CenterPoint,
++    visual_put_CenterPoint,
++    visual_get_Clip,
++    visual_put_Clip,
++    visual_get_CompositeMode,
++    visual_put_CompositeMode,
++    visual_get_IsVisible,
++    visual_put_IsVisible,
++    visual_get_Offset,
++    visual_put_Offset,
++    visual_get_Opacity,
++    visual_put_Opacity,
++    visual_get_Orientation,
++    visual_put_Orientation,
++    visual_get_Parent,
++    visual_get_RotationAngle,
++    visual_put_RotationAngle,
++    visual_get_RotationAngleInDegrees,
++    visual_put_RotationAngleInDegrees,
++    visual_get_RotationAxis,
++    visual_put_RotationAxis,
++    visual_get_Scale,
++    visual_put_Scale,
++    visual_get_Size,
++    visual_put_Size,
++    visual_get_TransformMatrix,
++    visual_put_TransformMatrix,
++};
++
++static HRESULT WINAPI sprite_visual_get_Brush( ISpriteVisual *iface, ICompositionBrush **value )
++{
++    struct visual *impl = impl_from_ISpriteVisual( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    if ((*value = impl->brush)) ICompositionBrush_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI sprite_visual_put_Brush( ISpriteVisual *iface, ICompositionBrush *value )
++{
++    struct visual *impl = impl_from_ISpriteVisual( iface );
++    TRACE( "iface %p.\n", iface );
++    if (value) ICompositionBrush_AddRef( value );
++    if (impl->brush) ICompositionBrush_Release( impl->brush );
++    impl->brush = value;
++    return S_OK;
++}
++
++static const struct ISpriteVisualVtbl sprite_visual_vtbl =
++{
++    sprite_visual_QueryInterface,
++    sprite_visual_AddRef,
++    sprite_visual_Release,
++    sprite_visual_GetIids,
++    sprite_visual_GetRuntimeClassName,
++    sprite_visual_GetTrustLevel,
++    sprite_visual_get_Brush,
++    sprite_visual_put_Brush,
++};
++
++static HRESULT WINAPI composition_object_get_Compositor( ICompositionObject *iface, ICompositor **value )
++{
++    struct visual *impl = impl_from_ICompositionObject( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    if ((*value = impl->compositor)) ICompositor_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI composition_object_get_Dispatcher( ICompositionObject *iface, __x_ABI_CWindows_CUI_CCore_CICoreDispatcher **value )
++{
++    TRACE( "iface %p, value %p.\n", iface, value );
++    /* A compositor driven by a CompositorController has no dispatcher. */
++    *value = NULL;
++    return S_OK;
++}
++
++static HRESULT WINAPI composition_object_get_Properties( ICompositionObject *iface, ICompositionPropertySet **value )
++{
++    struct visual *impl = impl_from_ICompositionObject( iface );
++    TRACE( "iface %p, value %p.\n", iface, value );
++    if ((*value = impl->properties)) ICompositionPropertySet_AddRef( *value );
++    return S_OK;
++}
++
++static HRESULT WINAPI composition_object_StartAnimation( ICompositionObject *iface, HSTRING name, ICompositionAnimation *animation )
++{
++    FIXME( "iface %p stub.\n", iface );
++    return E_NOTIMPL;
++}
++
++static HRESULT WINAPI composition_object_StopAnimation( ICompositionObject *iface, HSTRING name )
++{
++    FIXME( "iface %p stub.\n", iface );
++    return E_NOTIMPL;
++}
++
++static const struct ICompositionObjectVtbl composition_object_vtbl =
++{
++    composition_object_QueryInterface,
++    composition_object_AddRef,
++    composition_object_Release,
++    composition_object_GetIids,
++    composition_object_GetRuntimeClassName,
++    composition_object_GetTrustLevel,
++    composition_object_get_Compositor,
++    composition_object_get_Dispatcher,
++    composition_object_get_Properties,
++    composition_object_StartAnimation,
++    composition_object_StopAnimation,
++};
++
++
++static HRESULT WINAPI visual_closable_Close( IClosable *iface )
++{
++    struct visual *impl = impl_from_visual_IClosable( iface );
++
++    TRACE( "iface %p.\n", iface );
++
++    visual_detach( impl );
++    return S_OK;
++}
++
++static const struct IClosableVtbl visual_closable_vtbl =
++{
++    visual_closable_QueryInterface,
++    visual_closable_AddRef,
++    visual_closable_Release,
++    /* IInspectable methods */
++    visual_closable_GetIids,
++    visual_closable_GetRuntimeClassName,
++    visual_closable_GetTrustLevel,
++    /* IClosable methods */
++    visual_closable_Close,
++};
++
++static HRESULT sprite_visual_create( ICompositor *compositor, ISpriteVisual **out )
++{
++    struct visual *impl;
++
++    if (!(impl = calloc( 1, sizeof(*impl) )))
++        return E_OUTOFMEMORY;
++
++    impl->IVisual_iface.lpVtbl = &visual_vtbl;
++    impl->ISpriteVisual_iface.lpVtbl = &sprite_visual_vtbl;
++    impl->ICompositionObject_iface.lpVtbl = &composition_object_vtbl;
++    impl->IClosable_iface.lpVtbl = &visual_closable_vtbl;
++    impl->ref = 1;
++
++    /* A new visual is visible, fully opaque and untransformed. */
++    impl->is_visible = TRUE;
++    impl->opacity = 1.0f;
++    impl->scale.X = impl->scale.Y = impl->scale.Z = 1.0f;
++    impl->orientation.W = 1.0f;
++    impl->transform_matrix.M11 = impl->transform_matrix.M22 = 1.0f;
++    impl->transform_matrix.M33 = impl->transform_matrix.M44 = 1.0f;
++
++    if ((impl->compositor = compositor)) ICompositor_AddRef( compositor );
++
++    *out = &impl->ISpriteVisual_iface;
++
++    return S_OK;
++}
++
 +/* A composition target bound to a window. The visual tree set as its root is
 + * what a compositor would draw into that window. */
 +struct desktop_window_target
@@ -446,8 +1015,11 @@ index 2744d758e91..99d52918e8a 100644
 +
 +static HRESULT WINAPI compositor_CreateSpriteVisual( __x_ABI_CWindows_CUI_CComposition_CICompositor *iface, __x_ABI_CWindows_CUI_CComposition_CISpriteVisual **result )
 +{
-+    FIXME( "iface %p stub.\n", iface );
-+    return E_NOTIMPL;
++    TRACE( "iface %p, result %p.\n", iface, result );
++
++    if (!result) return E_POINTER;
++
++    return sprite_visual_create( iface, result );
 +}
 +
 +static HRESULT WINAPI compositor_CreateSurfaceBrush( __x_ABI_CWindows_CUI_CComposition_CICompositor *iface, __x_ABI_CWindows_CUI_CComposition_CICompositionSurfaceBrush **result )

@@ -1,9 +1,9 @@
 diff --git a/dlls/dcomp/private.h b/dlls/dcomp/private.h
 new file mode 100644
-index 00000000000..6b02b297683
+index 00000000000..16eefcf508e
 --- /dev/null
 +++ b/dlls/dcomp/private.h
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,77 @@
 +#ifndef __WINE_DCOMP_PRIVATE_H
 +#define __WINE_DCOMP_PRIVATE_H
 +
@@ -30,6 +30,7 @@ index 00000000000..6b02b297683
 +#define WIDL_using_Windows_UI_Composition_Core
 +#define WIDL_using_Windows_UI_Composition_Desktop
 +#define WIDL_using_Windows_Foundation
++#define WIDL_using_Windows_Foundation_Numerics
 +#include "windows.foundation.h"
 +#include "windows.ui.composition.core.h"
 +#include "windows.ui.composition.h"
