@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..b6f6bd7aadc 100644
+index 552d6d4c24c..c1cff795fd7 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -155,31 +155,11 @@ index 552d6d4c24c..b6f6bd7aadc 100644
          for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
          {
              ID3D11VertexShader_Release(context->shape_resources[i].vs);
-@@ -1214,71 +1326,950 @@ static void d2d_device_context_draw_bitmap(struct d2d_device_context *context, I
-         d.bottom = s.bottom - s.top;
-     }
+@@ -1234,51 +1346,930 @@ static void d2d_device_context_draw_bitmap(struct d2d_device_context *context, I
+     brush_desc.transform._22 = fabsf((d.bottom - d.top) / (s.bottom - s.top));
+     brush_desc.transform._32 = min(d.top, d.bottom) - min(s.top, s.bottom) * brush_desc.transform._22;
  
--    if (offset)
-+    if (offset)
-+    {
-+        d.left += offset->x;
-+        d.top += offset->y;
-+        d.right += offset->x;
-+        d.bottom += offset->y;
-+    }
-+
-+    bitmap_brush_desc.extendModeX = D2D1_EXTEND_MODE_CLAMP;
-+    bitmap_brush_desc.extendModeY = D2D1_EXTEND_MODE_CLAMP;
-+    bitmap_brush_desc.interpolationMode = interpolation_mode;
-+
-+    brush_desc.opacity = opacity;
-+    brush_desc.transform._11 = fabsf((d.right - d.left) / (s.right - s.left));
-+    brush_desc.transform._21 = 0.0f;
-+    brush_desc.transform._31 = min(d.left, d.right) - min(s.left, s.right) * brush_desc.transform._11;
-+    brush_desc.transform._12 = 0.0f;
-+    brush_desc.transform._22 = fabsf((d.bottom - d.top) / (s.bottom - s.top));
-+    brush_desc.transform._32 = min(d.top, d.bottom) - min(s.top, s.bottom) * brush_desc.transform._22;
-+
+-    if (FAILED(hr = d2d_bitmap_brush_create(context->factory, bitmap, &bitmap_brush_desc, &brush_desc, &brush)))
 +    if (FAILED(hr = d2d_bitmap_brush_create(context->factory, bitmap, &bitmap_brush_desc, &brush_desc, &brush)))
 +    {
 +        ERR("Failed to create bitmap brush, hr %#lx.\n", hr);
@@ -978,84 +958,65 @@ index 552d6d4c24c..b6f6bd7aadc 100644
 +    HRESULT hr;
 +
 +    if (depth > D2D_EFFECT_MAX_GRAPH_DEPTH)
-     {
--        d.left += offset->x;
--        d.top += offset->y;
--        d.right += offset->x;
--        d.bottom += offset->y;
++    {
 +        WARN("Effects are nested too deeply.\n");
 +        return E_FAIL;
-     }
- 
--    bitmap_brush_desc.extendModeX = D2D1_EXTEND_MODE_CLAMP;
--    bitmap_brush_desc.extendModeY = D2D1_EXTEND_MODE_CLAMP;
--    bitmap_brush_desc.interpolationMode = interpolation_mode;
++    }
++
 +    if (!effect->graph || !effect->graph->output)
 +        return E_FAIL;
- 
--    brush_desc.opacity = opacity;
--    brush_desc.transform._11 = fabsf((d.right - d.left) / (s.right - s.left));
--    brush_desc.transform._21 = 0.0f;
--    brush_desc.transform._31 = min(d.left, d.right) - min(s.left, s.right) * brush_desc.transform._11;
--    brush_desc.transform._12 = 0.0f;
--    brush_desc.transform._22 = fabsf((d.bottom - d.top) / (s.bottom - s.top));
--    brush_desc.transform._32 = min(d.top, d.bottom) - min(s.top, s.bottom) * brush_desc.transform._22;
++
 +    if (d2d_rect_l_width(requested) <= 0 || d2d_rect_l_height(requested) <= 0)
 +        return E_FAIL;
- 
--    if (FAILED(hr = d2d_bitmap_brush_create(context->factory, bitmap, &bitmap_brush_desc, &brush_desc, &brush)))
++
 +    /* An effect refreshes its render info -- in particular its pixel shader
 +     * constants -- from PrepareForRender(). Properties can change between
 +     * draws, so this has to run for every render and not just once when the
 +     * effect is created, or the shaders execute against stale constants. */
 +    if (effect->effect_impl && FAILED(hr = ID2D1EffectImpl_PrepareForRender(effect->effect_impl,
 +            D2D1_CHANGE_TYPE_PROPERTIES)))
-     {
--        ERR("Failed to create bitmap brush, hr %#lx.\n", hr);
--        return;
++    {
 +        WARN("PrepareForRender() failed, hr %#lx.\n", hr);
 +        return hr;
-     }
- 
--    d2d_device_context_FillRectangle(&context->ID2D1DeviceContext6_iface, &d, &brush->ID2D1Brush_iface);
--    ID2D1Brush_Release(&brush->ID2D1Brush_iface);
++    }
++
 +    return d2d_effect_render_node(context, effect, effect->graph->output, requested, depth,
 +            out, out_rect);
- }
- 
--static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6 *iface,
--        ID2D1Bitmap *bitmap, const D2D1_RECT_F *dst_rect, float opacity,
--        D2D1_BITMAP_INTERPOLATION_MODE interpolation_mode, const D2D1_RECT_F *src_rect)
++}
++
 +static void d2d_device_context_draw_effect(struct d2d_device_context *context, ID2D1Effect *effect,
 +        const D2D1_RECT_F *dst_rect, float opacity, D2D1_INTERPOLATION_MODE interpolation_mode,
 +        const D2D1_RECT_F *src_rect, const D2D1_POINT_2F *offset,
 +        const D2D1_MATRIX_4X4_F *perspective_transform)
- {
--    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
++{
 +    struct d2d_effect *effect_impl;
 +    struct d2d_bitmap *result;
 +    D2D1_RECT_L result_rect;
 +    ID2D1Image *input;
 +    unsigned int i;
- 
--    TRACE("iface %p, bitmap %p, dst_rect %s, opacity %.8e, interpolation_mode %#x, src_rect %s.\n",
--            iface, bitmap, debug_d2d_rect_f(dst_rect), opacity, interpolation_mode, debug_d2d_rect_f(src_rect));
++
 +    if ((effect_impl = unsafe_impl_from_ID2D1Effect(effect)))
-+    {
+     {
+-        ERR("Failed to create bitmap brush, hr %#lx.\n", hr);
+-        return;
+-    }
 +        D2D1_RECT_L requested;
 +        D2D1_RECT_F d;
  
--    if (FAILED(context->error.code))
--        return;
+-    d2d_device_context_FillRectangle(&context->ID2D1DeviceContext6_iface, &d, &brush->ID2D1Brush_iface);
+-    ID2D1Brush_Release(&brush->ID2D1Brush_iface);
+-}
 +        /* The region the caller wants bounds the whole evaluation. Effects
 +         * whose output is conceptually unbounded are clipped to it, so this
 +         * has to reflect what was actually asked for -- using the full target
 +         * here makes such an effect cover the entire render target. */
 +        const D2D1_RECT_F *hint = src_rect ? src_rect : dst_rect;
  
--    if (context->target.type == D2D_TARGET_UNKNOWN)
--    {
--        d2d_device_context_set_error(context, D2DERR_WRONG_STATE);
+-static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6 *iface,
+-        ID2D1Bitmap *bitmap, const D2D1_RECT_F *dst_rect, float opacity,
+-        D2D1_BITMAP_INTERPOLATION_MODE interpolation_mode, const D2D1_RECT_F *src_rect)
+-{
+-    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
 +        /* Start from the target, which is the largest region that can ever be
 +         * visible, then narrow to what the caller asked for. The hint is
 +         * clamped rather than converted directly: D2D uses very large floats
@@ -1065,7 +1026,9 @@ index 552d6d4c24c..b6f6bd7aadc 100644
 +        requested.top = 0;
 +        requested.right = context->pixel_size.width;
 +        requested.bottom = context->pixel_size.height;
-+
+ 
+-    TRACE("iface %p, bitmap %p, dst_rect %s, opacity %.8e, interpolation_mode %#x, src_rect %s.\n",
+-            iface, bitmap, debug_d2d_rect_f(dst_rect), opacity, interpolation_mode, debug_d2d_rect_f(src_rect));
 +        if (hint)
 +        {
 +            if (hint->left > 0.0f && hint->left < (float)requested.right)
@@ -1077,10 +1040,15 @@ index 552d6d4c24c..b6f6bd7aadc 100644
 +            if (hint->bottom > (float)requested.top && hint->bottom < (float)requested.bottom)
 +                requested.bottom = ceilf(hint->bottom);
 +        }
-+
+ 
+-    if (FAILED(context->error.code))
+-        return;
 +        if (FAILED(d2d_effect_run_graph(context, effect_impl, &requested, 0, &result, &result_rect)))
 +            goto fallback;
-+
+ 
+-    if (context->target.type == D2D_TARGET_UNKNOWN)
+-    {
+-        d2d_device_context_set_error(context, D2DERR_WRONG_STATE);
 +
 +        /* The intermediate holds exactly the effect's output rect, so it is
 +         * drawn at that rect rather than stretched over the target. An
@@ -1150,17 +1118,72 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  }
  
  static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
-@@ -2161,7 +3152,8 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
+@@ -1860,13 +2851,25 @@ static void STDMETHODCALLTYPE d2d_device_context_PopLayer(ID2D1DeviceContext6 *i
+ static HRESULT STDMETHODCALLTYPE d2d_device_context_Flush(ID2D1DeviceContext6 *iface, D2D1_TAG *tag1, D2D1_TAG *tag2)
+ {
+     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
++    ID3D11DeviceContext *d3d_context;
+ 
+-    FIXME("iface %p, tag1 %p, tag2 %p stub!\n", iface, tag1, tag2);
++    TRACE("iface %p, tag1 %p, tag2 %p.\n", iface, tag1, tag2);
+ 
+     if (context->ops && context->ops->device_context_present)
+         context->ops->device_context_present(context->outer_unknown);
+ 
+-    return S_OK;
++    /* Submit what has been recorded so far, which is what a caller flushing
++     * before it reads the target back is asking for. */
++    ID3D11Device1_GetImmediateContext(context->d3d_device, &d3d_context);
++    ID3D11DeviceContext_Flush(d3d_context);
++    ID3D11DeviceContext_Release(d3d_context);
++
++    if (tag1)
++        *tag1 = context->error.tag1;
++    if (tag2)
++        *tag2 = context->error.tag2;
++
++    return context->error.code;
+ }
+ 
+ static void STDMETHODCALLTYPE d2d_device_context_SaveDrawingState(ID2D1DeviceContext6 *iface,
+@@ -2161,9 +3164,34 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
  static BOOL STDMETHODCALLTYPE d2d_device_context_IsSupported(ID2D1DeviceContext6 *iface,
          const D2D1_RENDER_TARGET_PROPERTIES *desc)
  {
 -    FIXME("iface %p, desc %p stub!\n", iface, desc);
-+    FIXME("iface %p, desc %p stub!
-+", iface, desc);
++    struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
  
-     return FALSE;
+-    return FALSE;
++    TRACE("iface %p, desc %p.\n", iface, desc);
++
++    if (!desc)
++        return FALSE;
++
++    /* An unspecified field places no requirement, so only a field asking for
++     * something this context does not provide makes it unsupported. */
++    if (desc->type != D2D1_RENDER_TARGET_TYPE_DEFAULT
++            && desc->type != D2D1_RENDER_TARGET_TYPE_HARDWARE)
++        return FALSE;
++    if (desc->pixelFormat.format != DXGI_FORMAT_UNKNOWN
++            && desc->pixelFormat.format != context->desc.pixelFormat.format)
++        return FALSE;
++    if (desc->pixelFormat.alphaMode != D2D1_ALPHA_MODE_UNKNOWN
++            && desc->pixelFormat.alphaMode != context->desc.pixelFormat.alphaMode)
++        return FALSE;
++    if (desc->dpiX != 0.0f && desc->dpiX != context->desc.dpiX)
++        return FALSE;
++    if (desc->dpiY != 0.0f && desc->dpiY != context->desc.dpiY)
++        return FALSE;
++    if (desc->usage & ~context->desc.usage)
++        return FALSE;
++    if (desc->minLevel > context->desc.minLevel)
++        return FALSE;
++
++    return TRUE;
  }
-@@ -2199,13 +3191,331 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
+ 
+ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBitmap(ID2D1DeviceContext6 *iface,
+@@ -2199,13 +3227,331 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
      return hr;
  }
  
@@ -1494,7 +1517,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilename(ID2D1DeviceContext6 *iface,
-@@ -2219,8 +3529,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
+@@ -2219,8 +3565,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromWicColorContext(ID2D1DeviceContext6 *iface,
          IWICColorContext *wic_color_context, ID2D1ColorContext **color_context)
  {
@@ -1541,7 +1564,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
      return E_NOTIMPL;
  }
  
-@@ -2330,7 +3677,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
+@@ -2330,7 +3713,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
              iface, stops, stop_count, preinterpolation_space, postinterpolation_space,
              buffer_precision, extend_mode, color_interpolation_mode, gradient);
  
@@ -1550,7 +1573,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1DeviceContext6 *iface,
-@@ -2387,6 +3734,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
+@@ -2387,6 +3770,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
  {
      FIXME("iface %p, format %#x stub!\n", iface, format);
  
@@ -1558,7 +1581,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
      return FALSE;
  }
  
-@@ -2420,6 +3768,76 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
+@@ -2420,6 +3804,76 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
      return !!(support & D3D11_FORMAT_SUPPORT_BUFFER);
  }
  
@@ -1635,7 +1658,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1DeviceContext6 *iface,
          ID2D1Image *image, D2D1_RECT_F *local_bounds)
  {
-@@ -2427,6 +3845,8 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2427,6 +3881,8 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
      D2D_SIZE_U pixel_size;
      ID2D1Bitmap *bitmap;
      D2D_SIZE_F size;
@@ -1644,7 +1667,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  
      TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
  
-@@ -2456,7 +3876,57 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2456,7 +3912,57 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
  
          return S_OK;
      }
@@ -1703,7 +1726,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
      {
          FIXME("Unable to get local bounds of image %p.\n", image);
  
-@@ -2718,7 +4188,10 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2718,7 +4224,10 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          D2D1_COMPOSITE_MODE composite_mode)
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
@@ -1714,7 +1737,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  
      TRACE("iface %p, image %p, target_offset %s, image_rect %s, interpolation_mode %#x, composite_mode %#x.\n",
              iface, image, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
-@@ -2740,17 +4213,38 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2740,17 +4249,38 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          return;
      }
  
@@ -1755,7 +1778,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
      FIXME("Unhandled image %p.\n", image);
  }
  
-@@ -4253,7 +5747,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4253,7 +5783,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          { 1.0f, -1.0f},
      };
      static const UINT16 indices[] = {0, 1, 2, 2, 1, 3};
@@ -1764,7 +1787,7 @@ index 552d6d4c24c..b6f6bd7aadc 100644
  
      render_target->ID2D1DeviceContext6_iface.lpVtbl = &d2d_device_context_vtbl;
      render_target->ID2D1GdiInteropRenderTarget_iface.lpVtbl = &d2d_gdi_interop_render_target_vtbl;
-@@ -4278,6 +5772,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4278,6 +5808,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          goto err;
      }
  
