@@ -1,6 +1,6 @@
 diff --git a/dlls/dcomp/private.h b/dlls/dcomp/private.h
 new file mode 100644
-index 00000000000..5c58f4447f7
+index 00000000000..4e550739c15
 --- /dev/null
 +++ b/dlls/dcomp/private.h
 @@ -0,0 +1,81 @@
@@ -24,7 +24,7 @@ index 00000000000..5c58f4447f7
 +#include "unknwn.h"
 +#include "weakreference.h"
 +#include "dxgi.h"
-+#include "d3d11.h"
++#include "d3d11_4.h"
 +#include "wine/list.h"
 +
 +/* Define every namespace before the first include: these headers import each

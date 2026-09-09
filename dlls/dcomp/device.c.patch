@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..faac266d67b 100644
+index 2744d758e91..9f12797c388 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,16 +15,44 @@
@@ -47,7 +47,7 @@ index 2744d758e91..faac266d67b 100644
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +73,2210 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +73,2228 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -1993,6 +1993,7 @@ index 2744d758e91..faac266d67b 100644
 +    ID3D11Texture2D *buffer, *staging;
 +    D3D11_MAPPED_SUBRESOURCE map;
 +    ID3D11DeviceContext *context;
++    ID3D11Multithread *multithread = NULL;
 +    IDXGISwapChain *swapchain;
 +    BITMAPINFO info = {{0}};
 +    UINT present_count;
@@ -2031,6 +2032,17 @@ index 2744d758e91..faac266d67b 100644
 +    ID3D11Texture2D_GetDesc( buffer, &desc );
 +    ID3D11Texture2D_GetDevice( buffer, &device );
 +    ID3D11Device_GetImmediateContext( device, &context );
++
++    /* The application draws through this same context from its own thread, and
++     * a device context is not there to be used from two at once. Take the lock
++     * it provides for exactly this, or a frame gets read while it is still
++     * being drawn. */
++    if (SUCCEEDED(ID3D11DeviceContext_QueryInterface( context, &IID_ID3D11Multithread, (void **)&multithread )))
++    {
++        ID3D11Multithread_SetMultithreadProtected( multithread, TRUE );
++        ID3D11Multithread_Enter( multithread );
++    }
++    else WARN( "Context %p cannot be shared between threads.\n", context );
 +
 +    /* The back buffer is not readable by the CPU, so take a copy that is. */
 +    staging_desc = desc;
@@ -2084,6 +2096,12 @@ index 2744d758e91..faac266d67b 100644
 +        ID3D11Texture2D_Release( staging );
 +    }
 +    else WARN( "Failed to create staging texture, hr %#lx.\n", hr );
++
++    if (multithread)
++    {
++        ID3D11Multithread_Leave( multithread );
++        ID3D11Multithread_Release( multithread );
++    }
 +
 +    ID3D11DeviceContext_Release( context );
 +    ID3D11Device_Release( device );
