@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..2c22bde99bf 100644
+index 2744d758e91..faac266d67b 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,16 +15,44 @@
@@ -47,7 +47,7 @@ index 2744d758e91..2c22bde99bf 100644
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +73,2090 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +73,2210 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -1685,6 +1685,7 @@ index 2744d758e91..2c22bde99bf 100644
 +struct compositor_controller
 +{
 +    ICompositorController ICompositorController_iface;
++    IWeakReferenceSource IWeakReferenceSource_iface;
 +    LONG ref;
 +
 +    /* A controller always hands out the same compositor, created on demand. */
@@ -1695,6 +1696,117 @@ index 2744d758e91..2c22bde99bf 100644
 +    SIZE_T handler_count;
 +};
 +
++
++
++/* The controller is a singleton that lives as long as the module does, so a
++ * weak reference to it always has something to resolve to. */
++struct controller_weak_reference
++{
++    IWeakReference IWeakReference_iface;
++    LONG ref;
++};
++
++static struct compositor_controller compositor_controller_inst;
++
++static inline struct controller_weak_reference *impl_from_IWeakReference( IWeakReference *iface )
++{
++    return CONTAINING_RECORD( iface, struct controller_weak_reference, IWeakReference_iface );
++}
++
++static HRESULT WINAPI controller_weak_reference_QueryInterface( IWeakReference *iface, REFIID iid, void **out )
++{
++    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
++
++    if (IsEqualGUID( iid, &IID_IUnknown ) || IsEqualGUID( iid, &IID_IWeakReference ))
++    {
++        IWeakReference_AddRef( iface );
++        *out = iface;
++        return S_OK;
++    }
++
++    *out = NULL;
++    return E_NOINTERFACE;
++}
++
++static ULONG WINAPI controller_weak_reference_AddRef( IWeakReference *iface )
++{
++    struct controller_weak_reference *impl = impl_from_IWeakReference( iface );
++    return InterlockedIncrement( &impl->ref );
++}
++
++static ULONG WINAPI controller_weak_reference_Release( IWeakReference *iface )
++{
++    struct controller_weak_reference *impl = impl_from_IWeakReference( iface );
++    return InterlockedDecrement( &impl->ref );
++}
++
++static HRESULT WINAPI controller_weak_reference_Resolve( IWeakReference *iface, REFIID iid, IInspectable **out )
++{
++    TRACE( "iface %p, iid %s, out %p.\n", iface, debugstr_guid( iid ), out );
++
++    return ICompositorController_QueryInterface( &compositor_controller_inst.ICompositorController_iface,
++                                                 iid, (void **)out );
++}
++
++static const struct IWeakReferenceVtbl controller_weak_reference_vtbl =
++{
++    controller_weak_reference_QueryInterface,
++    controller_weak_reference_AddRef,
++    controller_weak_reference_Release,
++    /* IWeakReference methods */
++    controller_weak_reference_Resolve,
++};
++
++static struct controller_weak_reference controller_weak_reference_inst =
++{
++    {&controller_weak_reference_vtbl},
++    1,
++};
++
++static inline struct compositor_controller *impl_from_IWeakReferenceSource( IWeakReferenceSource *iface )
++{
++    return CONTAINING_RECORD( iface, struct compositor_controller, IWeakReferenceSource_iface );
++}
++
++static HRESULT WINAPI controller_weak_reference_source_QueryInterface( IWeakReferenceSource *iface,
++        REFIID iid, void **out )
++{
++    struct compositor_controller *impl = impl_from_IWeakReferenceSource( iface );
++    return ICompositorController_QueryInterface( &impl->ICompositorController_iface, iid, out );
++}
++
++static ULONG WINAPI controller_weak_reference_source_AddRef( IWeakReferenceSource *iface )
++{
++    struct compositor_controller *impl = impl_from_IWeakReferenceSource( iface );
++    return ICompositorController_AddRef( &impl->ICompositorController_iface );
++}
++
++static ULONG WINAPI controller_weak_reference_source_Release( IWeakReferenceSource *iface )
++{
++    struct compositor_controller *impl = impl_from_IWeakReferenceSource( iface );
++    return ICompositorController_Release( &impl->ICompositorController_iface );
++}
++
++static HRESULT WINAPI controller_weak_reference_source_GetWeakReference( IWeakReferenceSource *iface,
++        IWeakReference **ref )
++{
++    TRACE( "iface %p, ref %p.\n", iface, ref );
++
++    if (!ref) return E_POINTER;
++
++    IWeakReference_AddRef( &controller_weak_reference_inst.IWeakReference_iface );
++    *ref = &controller_weak_reference_inst.IWeakReference_iface;
++    return S_OK;
++}
++
++static const struct IWeakReferenceSourceVtbl controller_weak_reference_source_vtbl =
++{
++    controller_weak_reference_source_QueryInterface,
++    controller_weak_reference_source_AddRef,
++    controller_weak_reference_source_Release,
++    /* IWeakReferenceSource methods */
++    controller_weak_reference_source_GetWeakReference,
++};
 +
 +static inline struct compositor_controller *impl_from_ICompositorController( ICompositorController *iface )
 +{
@@ -1714,6 +1826,13 @@ index 2744d758e91..2c22bde99bf 100644
 +    {
 +        IUnknown_AddRef( iface );
 +        *out = &compositor->ICompositorController_iface;
++        return S_OK;
++    }
++
++    if (IsEqualGUID( iid, &IID_IWeakReferenceSource ))
++    {
++        IUnknown_AddRef( iface );
++        *out = &compositor->IWeakReferenceSource_iface;
 +        return S_OK;
 +    }
 +
@@ -2117,6 +2236,7 @@ index 2744d758e91..2c22bde99bf 100644
 +static struct compositor_controller compositor_controller_inst =
 +{
 +    {&compositor_controller_vtbl},
++    {&controller_weak_reference_source_vtbl},
 +    1,
 +};
 +

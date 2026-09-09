@@ -1,9 +1,9 @@
 diff --git a/dlls/dcomp/private.h b/dlls/dcomp/private.h
 new file mode 100644
-index 00000000000..f0b1dbffc7f
+index 00000000000..5c58f4447f7
 --- /dev/null
 +++ b/dlls/dcomp/private.h
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,81 @@
 +#ifndef __WINE_DCOMP_PRIVATE_H
 +#define __WINE_DCOMP_PRIVATE_H
 +
@@ -22,6 +22,7 @@ index 00000000000..f0b1dbffc7f
 +#include "wine/debug.h"
 +
 +#include "unknwn.h"
++#include "weakreference.h"
 +#include "dxgi.h"
 +#include "d3d11.h"
 +#include "wine/list.h"
