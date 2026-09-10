@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..e8dd62b14f2 100644
+index 94aa4586184..33c512efc14 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -5866,7 +5866,6 @@ static void test_shared_bitmap(BOOL d3d11)
@@ -66,9 +66,9 @@ index 94aa4586184..e8dd62b14f2 100644
 +    colour = get_readback_colour(&rb, 150, 150);
 +    ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx inside bounds.\n", colour);
 +    colour = get_readback_colour(&rb, 50, 50);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx above/left of bounds.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx above/left of bounds.\n", colour);
 +    colour = get_readback_colour(&rb, 300, 300);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx below/right of bounds.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx below/right of bounds.\n", colour);
 +    release_resource_readback(&rb);
 +
 +    ID2D1SolidColorBrush_Release(brush);
@@ -141,12 +141,12 @@ index 94aa4586184..e8dd62b14f2 100644
 +    colour = get_readback_colour(&rb, 150, 150);
 +    ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx inside mask.\n", colour);
 +    colour = get_readback_colour(&rb, 250, 250);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx outside mask.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx outside mask.\n", colour);
 +    /* The second layer's mask is the same geometry moved right by 200. */
 +    colour = get_readback_colour(&rb, 350, 150);
 +    ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx inside moved mask.\n", colour);
 +    colour = get_readback_colour(&rb, 450, 150);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx outside moved mask.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx outside moved mask.\n", colour);
 +    release_resource_readback(&rb);
 +
 +    ID2D1SolidColorBrush_Release(brush);
@@ -282,9 +282,9 @@ index 94aa4586184..e8dd62b14f2 100644
 +    colour = get_readback_colour(&rb, 250, 250);
 +    ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx inside both.\n", colour);
 +    colour = get_readback_colour(&rb, 150, 150);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx inside outer only.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx inside outer only.\n", colour);
 +    colour = get_readback_colour(&rb, 350, 350);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx inside inner only.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx inside inner only.\n", colour);
 +    release_resource_readback(&rb);
 +
 +    ID2D1SolidColorBrush_Release(brush);
@@ -322,10 +322,10 @@ index 94aa4586184..e8dd62b14f2 100644
 +    ID2D1RenderTarget_BeginDraw(rt);
 +    ID2D1RenderTarget_PushLayer(rt, &layer_desc, layer);
 +    hr = ID2D1RenderTarget_Flush(rt, NULL, NULL);
-+    todo_wine ok(FAILED(hr), "Got unexpected hr %#lx flushing with a layer pushed.\n", hr);
++    ok(FAILED(hr), "Got unexpected hr %#lx flushing with a layer pushed.\n", hr);
 +    ID2D1RenderTarget_PopLayer(rt);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-+    todo_wine ok(FAILED(hr), "Got unexpected hr %#lx.\n", hr);
++    ok(FAILED(hr), "Got unexpected hr %#lx.\n", hr);
 +
 +    /* "The error state can be cleared by a call to EndDraw." */
 +    ID2D1RenderTarget_BeginDraw(rt);
@@ -337,14 +337,14 @@ index 94aa4586184..e8dd62b14f2 100644
 +    ID2D1RenderTarget_BeginDraw(rt);
 +    ID2D1RenderTarget_PushLayer(rt, &layer_desc, layer);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-+    todo_wine ok(FAILED(hr), "Got unexpected hr %#lx ending a draw with a layer pushed.\n", hr);
++    ok(FAILED(hr), "Got unexpected hr %#lx ending a draw with a layer pushed.\n", hr);
 +
 +    /* "If there are more PopLayer calls than PushLayer calls, the render
 +     * target is placed into an error state." */
 +    ID2D1RenderTarget_BeginDraw(rt);
 +    ID2D1RenderTarget_PopLayer(rt);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-+    todo_wine ok(FAILED(hr), "Got unexpected hr %#lx popping a layer that was not pushed.\n", hr);
++    ok(FAILED(hr), "Got unexpected hr %#lx popping a layer that was not pushed.\n", hr);
 +
 +    /* "A particular ID2D1Layer resource can be active only at one time." */
 +    ID2D1RenderTarget_BeginDraw(rt);
@@ -353,7 +353,7 @@ index 94aa4586184..e8dd62b14f2 100644
 +    ID2D1RenderTarget_PopLayer(rt);
 +    ID2D1RenderTarget_PopLayer(rt);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-+    todo_wine ok(FAILED(hr), "Got unexpected hr %#lx pushing one layer twice.\n", hr);
++    ok(FAILED(hr), "Got unexpected hr %#lx pushing one layer twice.\n", hr);
 +
 +    ID2D1Layer_Release(layer);
 +    release_test_context(&ctx);
@@ -413,7 +413,7 @@ index 94aa4586184..e8dd62b14f2 100644
 +    colour = get_readback_colour(&rb, 150, 150);
 +    ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx inside bounds.\n", colour);
 +    colour = get_readback_colour(&rb, 50, 50);
-+    todo_wine ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx outside bounds.\n", colour);
++    ok(compare_colour(colour, 0xffffffff, 1), "Got unexpected colour 0x%08lx outside bounds.\n", colour);
 +    release_resource_readback(&rb);
 +
 +    ID2D1SolidColorBrush_Release(brush);
