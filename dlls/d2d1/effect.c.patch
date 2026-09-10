@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..45bf40f07eb 100644
+index c298aeca93d..5451f934342 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -122,7 +122,18 @@ index c298aeca93d..45bf40f07eb 100644
  }
  
  static void STDMETHODCALLTYPE d2d_border_transform_SetCached(
-@@ -983,6 +1080,225 @@ static ULONG STDMETHODCALLTYPE d2d_effect_impl_Release(ID2D1EffectImpl *iface)
+@@ -765,7 +862,10 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_SetSingleTransformNode(ID2D
+ 
+     input_count = ID2D1TransformNode_GetInputCount(object);
+     if (graph->input_count != input_count)
++    {
++        WARN("Node %p has %u inputs, the graph has %u.\n", object, input_count, graph->input_count);
+         return E_INVALIDARG;
++    }
+ 
+     for (i = 0; i < graph->input_count; ++i)
+     {
+@@ -983,6 +1083,225 @@ static ULONG STDMETHODCALLTYPE d2d_effect_impl_Release(ID2D1EffectImpl *iface)
      return refcount;
  }
  
@@ -348,7 +359,7 @@ index c298aeca93d..45bf40f07eb 100644
  static HRESULT STDMETHODCALLTYPE d2d_effect_impl_Initialize(ID2D1EffectImpl *iface,
          ID2D1EffectContext *context, ID2D1TransformGraph *graph)
  {
-@@ -1009,6 +1325,41 @@ static const ID2D1EffectImplVtbl d2d_effect_impl_vtbl =
+@@ -1009,6 +1328,41 @@ static const ID2D1EffectImplVtbl d2d_effect_impl_vtbl =
      d2d_effect_impl_SetGraph,
  };
  
@@ -390,7 +401,7 @@ index c298aeca93d..45bf40f07eb 100644
  static HRESULT d2d_effect_create_impl(IUnknown **effect_impl, const void *props,
          size_t props_size)
  {
-@@ -1213,139 +1564,771 @@ static HRESULT __stdcall _3d_perspective_transform_factory(IUnknown **effect)
+@@ -1213,139 +1567,771 @@ static HRESULT __stdcall _3d_perspective_transform_factory(IUnknown **effect)
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
  }
  
@@ -1228,7 +1239,7 @@ index c298aeca93d..45bf40f07eb 100644
  }
  
  static const WCHAR color_matrix_description[] =
-@@ -1468,6 +2451,52 @@ static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
+@@ -1468,6 +2454,52 @@ static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
  }
  
@@ -1281,7 +1292,7 @@ index c298aeca93d..45bf40f07eb 100644
  static const WCHAR point_specular_description[] =
  L"<?xml version='1.0'?>                                                   \
    <Effect>                                                                \
-@@ -1804,23 +2833,6 @@ static HRESULT __stdcall scale_factory(IUnknown **effect)
+@@ -1804,23 +2836,6 @@ static HRESULT __stdcall scale_factory(IUnknown **effect)
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
  }
  
@@ -1305,7 +1316,7 @@ index c298aeca93d..45bf40f07eb 100644
  static const WCHAR _3d_transform_description[] =
  L"<?xml version='1.0'?>                                                   \
    <Effect>                                                                \
-@@ -1865,59 +2877,98 @@ static HRESULT __stdcall _3d_transform_factory(IUnknown **effect)
+@@ -1865,59 +2880,98 @@ static HRESULT __stdcall _3d_transform_factory(IUnknown **effect)
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
  }
  
@@ -1447,7 +1458,7 @@ index c298aeca93d..45bf40f07eb 100644
  void d2d_effects_init_builtins(struct d2d_factory *factory)
  {
      static const struct builtin_description
-@@ -1938,10 +2989,18 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+@@ -1938,10 +2992,18 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
          { &CLSID_D2D1Crop, X2(crop) },
          { &CLSID_D2D1Shadow, X2(shadow) },
          { &CLSID_D2D1Grayscale, X(grayscale) },
@@ -1466,7 +1477,7 @@ index c298aeca93d..45bf40f07eb 100644
          { &CLSID_D2D1ArithmeticComposite, X2(arithmetic_composite) },
          { &CLSID_D2D1Blend, X2(blend) },
          { &CLSID_D2D1Brightness, X2(brightness) },
-@@ -1949,9 +3008,8 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+@@ -1949,9 +3011,8 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
          { &CLSID_D2D1HueRotation, X2(hue_rotation) },
          { &CLSID_D2D1Saturation, X2(saturation) },
          { &CLSID_D2D1Scale, X2(scale) },
@@ -1477,7 +1488,7 @@ index c298aeca93d..45bf40f07eb 100644
  #undef X2
  #undef X
      };
-@@ -2360,8 +3418,11 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_QueryInterface(ID2D1EffectCo
+@@ -2360,8 +3421,11 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_QueryInterface(ID2D1EffectCo
  {
      TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
  
@@ -1491,7 +1502,7 @@ index c298aeca93d..45bf40f07eb 100644
      {
          ID2D1EffectContext_AddRef(iface);
          *out = iface;
-@@ -2423,17 +3484,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
+@@ -2423,17 +3487,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_GetMaximumSupportedFeatureLevel(ID2D1EffectContext *iface,
          const D3D_FEATURE_LEVEL *levels, UINT32 level_count, D3D_FEATURE_LEVEL *max_level)
  {
@@ -1538,7 +1549,7 @@ index c298aeca93d..45bf40f07eb 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateBlendTransform(ID2D1EffectContext *iface,
-@@ -2740,6 +3826,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
+@@ -2740,6 +3829,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
      if (effect->graph)
          ID2D1TransformGraph_Release(&effect->graph->ID2D1TransformGraph_iface);
      d2d_effect_properties_cleanup(&effect->properties);
@@ -1547,7 +1558,7 @@ index c298aeca93d..45bf40f07eb 100644
      if (effect->impl)
          ID2D1EffectImpl_Release(effect->impl);
  }
-@@ -2968,7 +4056,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
+@@ -2968,7 +4059,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
  
          if (SUCCEEDED(hr = d2d_transform_graph_create(count, &effect->graph)))
          {
@@ -1556,7 +1567,7 @@ index c298aeca93d..45bf40f07eb 100644
                  WARN("Failed to set a new transform graph, hr %#lx.\n", hr);
          }
      }
-@@ -3366,7 +4454,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
+@@ -3366,7 +4457,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
      TRACE("iface %p refcount %lu.\n", iface, refcount);
  
      if (!refcount)
@@ -1567,7 +1578,7 @@ index c298aeca93d..45bf40f07eb 100644
  
      return refcount;
  }
-@@ -3376,7 +4467,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
+@@ -3376,7 +4470,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
  {
      FIXME("iface %p, index %u stub.\n", iface, index);
  
@@ -1576,7 +1587,7 @@ index c298aeca93d..45bf40f07eb 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *iface,
-@@ -3384,7 +4475,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
+@@ -3384,7 +4478,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
  {
      FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
  
@@ -1585,7 +1596,7 @@ index c298aeca93d..45bf40f07eb 100644
  }
  
  static void STDMETHODCALLTYPE d2d_draw_info_SetCached(ID2D1DrawInfo *iface, BOOL is_cached)
-@@ -3401,9 +4492,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
+@@ -3401,9 +4495,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetPixelShaderConstantBuffer(ID2D1DrawInfo *iface,
          const BYTE *buffer, UINT32 size)
  {
@@ -1618,7 +1629,7 @@ index c298aeca93d..45bf40f07eb 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
-@@ -3526,14 +4638,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3526,14 +4641,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          }
          else
          {
@@ -1649,7 +1660,7 @@ index c298aeca93d..45bf40f07eb 100644
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect)
  {
-@@ -3543,11 +4669,98 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3543,11 +4672,98 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -1749,7 +1760,7 @@ index c298aeca93d..45bf40f07eb 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3564,6 +4777,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3564,6 +4780,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      object->ID2D1Image_iface.lpVtbl = &d2d_effect_image_vtbl;
      object->refcount = 1;
      object->effect_context = effect_context;
@@ -1757,7 +1768,7 @@ index c298aeca93d..45bf40f07eb 100644
  
      /* Create properties */
      d2d_effect_duplicate_properties(object, &object->properties, reg->properties);
-@@ -3589,8 +4803,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3589,8 +4806,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -1774,7 +1785,7 @@ index c298aeca93d..45bf40f07eb 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +4825,21 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +4828,21 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  
