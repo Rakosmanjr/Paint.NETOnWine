@@ -1,0 +1,188 @@
+diff --git a/dlls/winewayland.drv/window.c b/dlls/winewayland.drv/window.c
+index 270fdfb40e6..a900a0adf45 100644
+--- a/dlls/winewayland.drv/window.c
++++ b/dlls/winewayland.drv/window.c
+@@ -139,7 +139,7 @@ static void wayland_win_data_get_config(struct wayland_win_data *data,
+     DWORD style;
+ 
+     conf->rect = data->rects.visible;
+-    style = NtUserGetWindowLongW(data->hwnd, GWL_STYLE);
++    style = data->style;
+ 
+     TRACE("window=%s style=%#x\n", wine_dbgstr_rect(&conf->rect), style);
+ 
+@@ -172,33 +172,44 @@ static void reapply_cursor_clipping(void)
+     NtUserSetThreadDpiAwarenessContext(context);
+ }
+ 
+-static BOOL wayland_win_data_create_wayland_surface(struct wayland_win_data *data, struct wayland_surface *owner_surface)
++static enum wayland_surface_role wayland_win_data_get_role(const struct wayland_win_data *data,
++                                                           const struct wayland_surface *owner_surface)
+ {
+-    struct wayland_surface *surface;
+-    enum wayland_surface_role role;
+-    BOOL visible;
+-    DWORD exstyle = NtUserGetWindowLongW(data->hwnd, GWL_EXSTYLE);
+-    struct wl_region *input_region;
++    BOOL visible = ((data->style & WS_VISIBLE) == WS_VISIBLE) &&
++                   (!(data->exstyle & WS_EX_LAYERED) || data->layered_attribs_set);
+ 
+-    TRACE("hwnd=%p\n", data->hwnd);
++    if (!visible) return WAYLAND_SURFACE_ROLE_NONE;
++    if (owner_surface) return WAYLAND_SURFACE_ROLE_SUBSURFACE;
++    return WAYLAND_SURFACE_ROLE_TOPLEVEL;
++}
+ 
+-    visible = ((NtUserGetWindowLongW(data->hwnd, GWL_STYLE) & WS_VISIBLE) == WS_VISIBLE) &&
+-               (!(exstyle & WS_EX_LAYERED) || data->layered_attribs_set);
++/* A surface can temporarily lose its role, but cannot be given a different
++ * one once it has had one. Detach a surface whose role would have to change,
++ * and return it so that the caller can dispose of it. */
++static struct wayland_surface *wayland_win_data_detach_role_changed_surface(struct wayland_win_data *data,
++                                                                            const struct wayland_surface *owner_surface)
++{
++    enum wayland_surface_role role = wayland_win_data_get_role(data, owner_surface);
++    struct wayland_surface *surface = data->wayland_surface;
+ 
+-    if (!visible) role = WAYLAND_SURFACE_ROLE_NONE;
+-    else if (owner_surface) role = WAYLAND_SURFACE_ROLE_SUBSURFACE;
+-    else role = WAYLAND_SURFACE_ROLE_TOPLEVEL;
++    if (!surface || !role || !surface->role || surface->role == role) return NULL;
+ 
+-    /* we can temporarily clear the role of a surface but cannot assign a different one after it's set */
+-    if ((surface = data->wayland_surface) && role && surface->role && surface->role != role)
+-    {
+-        /* Make sure any attached client surface is detached before we destroy the surface.
+-         * They will be reattached when win32u updates them again after WindowPosChanged.
+-         */
+-        data->wayland_surface = NULL;
+-        update_client_surfaces(data->hwnd);
+-        wayland_surface_destroy(surface);
+-    }
++    data->wayland_surface = NULL;
++    return surface;
++}
++
++/* Called with win_data locked. Nothing in here may call back into win32u:
++ * win32u takes its user lock before calling into the driver and the driver
++ * takes win_data_mutex, so taking them the other way round deadlocks. */
++static BOOL wayland_win_data_create_wayland_surface(struct wayland_win_data *data, struct wayland_surface *owner_surface,
++                                                    const WCHAR *title)
++{
++    enum wayland_surface_role role = wayland_win_data_get_role(data, owner_surface);
++    DWORD exstyle = data->exstyle;
++    struct wayland_surface *surface;
++    struct wl_region *input_region;
++
++    TRACE("hwnd=%p\n", data->hwnd);
+ 
+     if (!(surface = data->wayland_surface) && !(surface = wayland_surface_create(data->hwnd))) return FALSE;
+ 
+@@ -219,7 +230,7 @@ static BOOL wayland_win_data_create_wayland_surface(struct wayland_win_data *dat
+         wayland_surface_clear_role(surface);
+         break;
+     case WAYLAND_SURFACE_ROLE_TOPLEVEL:
+-        wayland_surface_make_toplevel(surface);
++        wayland_surface_make_toplevel(surface, title);
+         break;
+     case WAYLAND_SURFACE_ROLE_SUBSURFACE:
+         wayland_surface_make_subsurface(surface, owner_surface);
+@@ -228,10 +239,6 @@ static BOOL wayland_win_data_create_wayland_surface(struct wayland_win_data *dat
+ 
+     wayland_win_data_get_config(data, &surface->window);
+ 
+-    /* Size/position changes affect the effective pointer constraint, so update
+-     * it as needed. */
+-    if (data->hwnd == NtUserGetForegroundWindow()) reapply_cursor_clipping();
+-
+     TRACE("hwnd=%p surface=%p=>%p\n", data->hwnd, data->wayland_surface, surface);
+     data->wayland_surface = surface;
+     return TRUE;
+@@ -435,16 +442,25 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UIN
+                               const struct window_rects *new_rects, struct window_surface *surface)
+ {
+     HWND owner = NtUserGetAncestor(hwnd, GA_ROOT);
+-    struct wayland_surface *owner_surface;
++    struct wayland_surface *owner_surface, *old_surface;
+     struct wayland_win_data *data, *owner_data;
+-    BOOL managed, fullscreen = swp_flags & WINE_SWP_FULLSCREEN;
++    BOOL managed, foreground, created = FALSE, fullscreen = swp_flags & WINE_SWP_FULLSCREEN;
++    DWORD style, exstyle;
++    WCHAR title[1024];
+ 
+     TRACE("hwnd %p new_rects %s after %p flags %08x\n", hwnd, debugstr_window_rects(new_rects), insert_after, swp_flags);
+ 
+-    /* Get the managed state with win_data unlocked, as is_window_managed
+-     * may need to query win_data information about other HWNDs and thus
+-     * acquire the lock itself internally. */
++    /* Everything win32u has to tell us is asked for with win_data unlocked.
++     * win32u holds its user lock while calling into the driver, and the driver
++     * takes win_data_mutex, so asking win32u anything with win_data locked
++     * takes those locks in the opposite order and can deadlock against a
++     * thread doing the usual thing. is_window_managed also queries win_data
++     * for other windows and so needs the lock free. */
+     if (!(managed = is_window_managed(hwnd, swp_flags, fullscreen)) && surface) owner = owner_hint;
++    style = NtUserGetWindowLongW(hwnd, GWL_STYLE);
++    exstyle = NtUserGetWindowLongW(hwnd, GWL_EXSTYLE);
++    foreground = NtUserGetForegroundWindow() == hwnd;
++    if (!NtUserInternalGetWindowText(hwnd, title, ARRAY_SIZE(title))) title[0] = 0;
+ 
+     if (!(data = wayland_win_data_get(hwnd))) return;
+     owner_data = owner && owner != hwnd ? wayland_win_data_get(owner) : NULL;
+@@ -454,6 +470,8 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UIN
+     data->is_fullscreen = fullscreen;
+     data->resizeable = swp_flags & WINE_SWP_RESIZABLE;
+     data->managed = managed;
++    data->style = style;
++    data->exstyle = exstyle;
+ 
+     if (!surface)
+     {
+@@ -463,13 +481,35 @@ void WAYLAND_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UIN
+             data->wayland_surface = NULL;
+         }
+     }
+-    else if (wayland_win_data_create_wayland_surface(data, owner_surface))
++    else
+     {
+-        wayland_win_data_update_wayland_state(data);
++        if ((old_surface = wayland_win_data_detach_role_changed_surface(data, owner_surface)))
++        {
++            /* Client surfaces attached to the old surface have to be detached
++             * before it goes, and win32u does that for us; it is a call back
++             * into win32u, so it cannot be made with win_data held. They will
++             * be reattached when win32u updates them after WindowPosChanged. */
++            if (owner_data) wayland_win_data_release(owner_data);
++            wayland_win_data_release(data);
++
++            update_client_surfaces(hwnd);
++            wayland_surface_destroy(old_surface);
++
++            if (!(data = wayland_win_data_get(hwnd))) return;
++            owner_data = owner && owner != hwnd ? wayland_win_data_get(owner) : NULL;
++            owner_surface = owner_data ? owner_data->wayland_surface : NULL;
++        }
++
++        if ((created = wayland_win_data_create_wayland_surface(data, owner_surface, title)))
++            wayland_win_data_update_wayland_state(data);
+     }
+ 
+     if (owner_data) wayland_win_data_release(owner_data);
+     wayland_win_data_release(data);
++
++    /* Size/position changes affect the effective pointer constraint, so update
++     * it as needed. */
++    if (created && foreground) reapply_cursor_clipping();
+ }
+ 
+ static void wayland_configure_window(HWND hwnd)
+@@ -711,6 +751,9 @@ void WAYLAND_SetWindowStyle(HWND hwnd, INT offset, STYLESTRUCT *style)
+     if (hwnd == NtUserGetDesktopWindow()) return;
+     if (!(data = wayland_win_data_get(hwnd))) return;
+ 
++    if (offset == GWL_STYLE) data->style = style->styleNew;
++    else if (offset == GWL_EXSTYLE) data->exstyle = style->styleNew;
++
+     /* Changing WS_EX_LAYERED resets attributes */
+     if (offset == GWL_EXSTYLE && (changed & WS_EX_LAYERED))
+     {

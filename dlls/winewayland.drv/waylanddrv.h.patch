@@ -1,0 +1,24 @@
+diff --git a/dlls/winewayland.drv/waylanddrv.h b/dlls/winewayland.drv/waylanddrv.h
+index 1cb525b213e..a3fded641b5 100644
+--- a/dlls/winewayland.drv/waylanddrv.h
++++ b/dlls/winewayland.drv/waylanddrv.h
+@@ -333,7 +333,7 @@ void color_management_init(void);
+ 
+ struct wayland_surface *wayland_surface_create(HWND hwnd);
+ void wayland_surface_destroy(struct wayland_surface *surface);
+-void wayland_surface_make_toplevel(struct wayland_surface *surface);
++void wayland_surface_make_toplevel(struct wayland_surface *surface, const WCHAR *title);
+ void wayland_surface_make_subsurface(struct wayland_surface *surface,
+                                      struct wayland_surface *parent);
+ void wayland_surface_clear_role(struct wayland_surface *surface);
+@@ -392,6 +392,10 @@ struct wayland_win_data
+     BOOL resizeable;
+     BOOL managed;
+     BOOL layered_attribs_set;
++    /* window styles, kept here so that they can be read while win_data_mutex
++     * is held without calling back into win32u */
++    DWORD style;
++    DWORD exstyle;
+ };
+ 
+ struct wayland_win_data *wayland_win_data_get(HWND hwnd);
