@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..56cccd46eeb 100644
+index 552d6d4c24c..01feb288ece 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -10,7 +10,23 @@ index 552d6d4c24c..56cccd46eeb 100644
  
  WINE_DEFAULT_DEBUG_CHANNEL(d2d);
  
-@@ -116,6 +117,82 @@ static void d2d_clip_stack_pop(struct d2d_clip_stack *stack)
+@@ -78,6 +79,15 @@ static void d2d_size_set(D2D1_SIZE_U *dst, float width, float height)
+     dst->height = height;
+ }
+ 
++static LONG d2d_clamp_scissor(float value, unsigned int limit)
++{
++    if (!(value > 0.0f))
++        return 0;
++    if (value >= (float)limit)
++        return limit;
++    return value;
++}
++
+ static BOOL d2d_clip_stack_init(struct d2d_clip_stack *stack)
+ {
+     if (!(stack->stack = malloc(INITIAL_CLIP_STACK_SIZE * sizeof(*stack->stack))))
+@@ -116,6 +126,82 @@ static void d2d_clip_stack_pop(struct d2d_clip_stack *stack)
      --stack->count;
  }
  
@@ -93,26 +109,39 @@ index 552d6d4c24c..56cccd46eeb 100644
  static void d2d_device_context_draw(struct d2d_device_context *render_target, enum d2d_shape_type shape_type,
          ID3D11Buffer *ib, unsigned int index_count, ID3D11Buffer *vb, unsigned int vb_stride,
          struct d2d_brush *brush, struct d2d_brush *opacity_brush)
-@@ -169,12 +246,31 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
+@@ -156,25 +242,38 @@ static void d2d_device_context_draw(struct d2d_device_context *render_target, en
+     {
+         const D2D1_RECT_F *clip_rect;
+ 
++        /* A clip rectangle may be far larger than the target -- an
++         * application clipping to "everything" passes one that is effectively
++         * infinite -- and a scissor rectangle outside the viewport bounds is
++         * not clamped for us. Nothing beyond the target is visible anyway.
++         * Clamp before converting: a float too large for a LONG does not
++         * convert to a large LONG. */
+         clip_rect = &render_target->clip_stack.stack[render_target->clip_stack.count - 1];
+-        scissor_rect.left = ceilf(clip_rect->left - 0.5f);
+-        scissor_rect.top = ceilf(clip_rect->top - 0.5f);
+-        scissor_rect.right = ceilf(clip_rect->right - 0.5f);
+-        scissor_rect.bottom = ceilf(clip_rect->bottom - 0.5f);
++        scissor_rect.left = d2d_clamp_scissor(ceilf(clip_rect->left - 0.5f), render_target->pixel_size.width);
++        scissor_rect.top = d2d_clamp_scissor(ceilf(clip_rect->top - 0.5f), render_target->pixel_size.height);
++        scissor_rect.right = d2d_clamp_scissor(ceilf(clip_rect->right - 0.5f), render_target->pixel_size.width);
++        scissor_rect.bottom = d2d_clamp_scissor(ceilf(clip_rect->bottom - 0.5f), render_target->pixel_size.height);
++        if (scissor_rect.right < scissor_rect.left)
++            scissor_rect.right = scissor_rect.left;
++        if (scissor_rect.bottom < scissor_rect.top)
++            scissor_rect.bottom = scissor_rect.top;
+     }
+     else
+     {
+-        scissor_rect.left = 0.0f;
+-        scissor_rect.top = 0.0f;
++        scissor_rect.left = 0;
++        scissor_rect.top = 0;
          scissor_rect.right = render_target->pixel_size.width;
          scissor_rect.bottom = render_target->pixel_size.height;
      }
-+    /* A clip rectangle may be far larger than the target -- an application
-+     * clipping to "everything" passes one that is effectively infinite -- and
-+     * a scissor rectangle outside the viewport bounds is not clamped for us.
-+     * Nothing beyond the target is visible anyway. */
-+    if (scissor_rect.left < 0)
-+        scissor_rect.left = 0;
-+    if (scissor_rect.top < 0)
-+        scissor_rect.top = 0;
-+    if (scissor_rect.right > (LONG)render_target->pixel_size.width)
-+        scissor_rect.right = render_target->pixel_size.width;
-+    if (scissor_rect.bottom > (LONG)render_target->pixel_size.height)
-+        scissor_rect.bottom = render_target->pixel_size.height;
-+    if (scissor_rect.right < scissor_rect.left)
-+        scissor_rect.right = scissor_rect.left;
-+    if (scissor_rect.bottom < scissor_rect.top)
-+        scissor_rect.bottom = scissor_rect.top;
 +
      ID3D11DeviceContext1_RSSetScissorRects(context, 1, &scissor_rect);
      ID3D11DeviceContext1_RSSetState(context, render_target->rs);
@@ -126,7 +155,7 @@ index 552d6d4c24c..56cccd46eeb 100644
          d2d_brush_bind_resources(brush, render_target, 0);
      }
      else
-@@ -276,12 +372,28 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
+@@ -276,12 +375,28 @@ static ULONG STDMETHODCALLTYPE d2d_device_context_inner_Release(IUnknown *iface)
              IDWriteRenderingParams_Release(context->text_rendering_params);
          if (context->bs)
              ID3D11BlendState_Release(context->bs);
@@ -155,7 +184,7 @@ index 552d6d4c24c..56cccd46eeb 100644
          for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
          {
              ID3D11VertexShader_Release(context->shape_resources[i].vs);
-@@ -1236,49 +1348,928 @@ static void d2d_device_context_draw_bitmap(struct d2d_device_context *context, I
+@@ -1236,49 +1351,928 @@ static void d2d_device_context_draw_bitmap(struct d2d_device_context *context, I
  
      if (FAILED(hr = d2d_bitmap_brush_create(context->factory, bitmap, &bitmap_brush_desc, &brush_desc, &brush)))
      {
@@ -1115,7 +1144,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  }
  
  static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
-@@ -1860,13 +2851,25 @@ static void STDMETHODCALLTYPE d2d_device_context_PopLayer(ID2D1DeviceContext6 *i
+@@ -1860,13 +2854,25 @@ static void STDMETHODCALLTYPE d2d_device_context_PopLayer(ID2D1DeviceContext6 *i
  static HRESULT STDMETHODCALLTYPE d2d_device_context_Flush(ID2D1DeviceContext6 *iface, D2D1_TAG *tag1, D2D1_TAG *tag2)
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
@@ -1143,7 +1172,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  }
  
  static void STDMETHODCALLTYPE d2d_device_context_SaveDrawingState(ID2D1DeviceContext6 *iface,
-@@ -2059,6 +3062,9 @@ static void STDMETHODCALLTYPE d2d_device_context_BeginDraw(ID2D1DeviceContext6 *
+@@ -2059,6 +3065,9 @@ static void STDMETHODCALLTYPE d2d_device_context_BeginDraw(ID2D1DeviceContext6 *
      if (context->target.type == D2D_TARGET_COMMAND_LIST)
          d2d_command_list_begin_draw(context->target.command_list, context);
  
@@ -1153,7 +1182,7 @@ index 552d6d4c24c..56cccd46eeb 100644
      memset(&context->error, 0, sizeof(context->error));
  }
  
-@@ -2161,9 +3167,34 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
+@@ -2161,9 +3170,34 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
  static BOOL STDMETHODCALLTYPE d2d_device_context_IsSupported(ID2D1DeviceContext6 *iface,
          const D2D1_RENDER_TARGET_PROPERTIES *desc)
  {
@@ -1190,7 +1219,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBitmap(ID2D1DeviceContext6 *iface,
-@@ -2199,13 +3230,331 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
+@@ -2199,13 +3233,331 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
      return hr;
  }
  
@@ -1524,7 +1553,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilename(ID2D1DeviceContext6 *iface,
-@@ -2219,8 +3568,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
+@@ -2219,8 +3571,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromWicColorContext(ID2D1DeviceContext6 *iface,
          IWICColorContext *wic_color_context, ID2D1ColorContext **color_context)
  {
@@ -1571,7 +1600,7 @@ index 552d6d4c24c..56cccd46eeb 100644
      return E_NOTIMPL;
  }
  
-@@ -2330,7 +3716,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
+@@ -2330,7 +3719,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
              iface, stops, stop_count, preinterpolation_space, postinterpolation_space,
              buffer_precision, extend_mode, color_interpolation_mode, gradient);
  
@@ -1580,7 +1609,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1DeviceContext6 *iface,
-@@ -2387,6 +3773,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
+@@ -2387,6 +3776,7 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1Devi
  {
      FIXME("iface %p, format %#x stub!\n", iface, format);
  
@@ -1588,7 +1617,7 @@ index 552d6d4c24c..56cccd46eeb 100644
      return FALSE;
  }
  
-@@ -2420,6 +3807,76 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
+@@ -2420,6 +3810,76 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
      return !!(support & D3D11_FORMAT_SUPPORT_BUFFER);
  }
  
@@ -1665,7 +1694,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1DeviceContext6 *iface,
          ID2D1Image *image, D2D1_RECT_F *local_bounds)
  {
-@@ -2427,6 +3884,8 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2427,6 +3887,8 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
      D2D_SIZE_U pixel_size;
      ID2D1Bitmap *bitmap;
      D2D_SIZE_F size;
@@ -1674,7 +1703,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  
      TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
  
-@@ -2456,7 +3915,57 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2456,7 +3918,57 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
  
          return S_OK;
      }
@@ -1733,7 +1762,7 @@ index 552d6d4c24c..56cccd46eeb 100644
      {
          FIXME("Unable to get local bounds of image %p.\n", image);
  
-@@ -2718,7 +4227,10 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2718,7 +4230,10 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          D2D1_COMPOSITE_MODE composite_mode)
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
@@ -1744,7 +1773,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  
      TRACE("iface %p, image %p, target_offset %s, image_rect %s, interpolation_mode %#x, composite_mode %#x.\n",
              iface, image, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
-@@ -2740,17 +4252,38 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2740,17 +4255,38 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          return;
      }
  
@@ -1785,7 +1814,7 @@ index 552d6d4c24c..56cccd46eeb 100644
      FIXME("Unhandled image %p.\n", image);
  }
  
-@@ -4253,7 +5786,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4253,7 +5789,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          { 1.0f, -1.0f},
      };
      static const UINT16 indices[] = {0, 1, 2, 2, 1, 3};
@@ -1794,7 +1823,7 @@ index 552d6d4c24c..56cccd46eeb 100644
  
      render_target->ID2D1DeviceContext6_iface.lpVtbl = &d2d_device_context_vtbl;
      render_target->ID2D1GdiInteropRenderTarget_iface.lpVtbl = &d2d_gdi_interop_render_target_vtbl;
-@@ -4278,6 +5811,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4278,6 +5814,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          goto err;
      }
  
