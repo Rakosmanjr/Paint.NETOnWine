@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/command_list.c b/dlls/d2d1/command_list.c
-index 6c830d2660e..f7e9664092f 100644
+index 6c830d2660e..affaaad09e4 100644
 --- a/dlls/d2d1/command_list.c
 +++ b/dlls/d2d1/command_list.c
 @@ -504,7 +504,13 @@ static HRESULT STDMETHODCALLTYPE d2d_command_list_Close(ID2D1CommandList *iface)
@@ -17,12 +17,14 @@ index 6c830d2660e..f7e9664092f 100644
          return D2DERR_WRONG_STATE;
  
      command_list->state = D2D_COMMAND_LIST_STATE_CLOSED;
-@@ -1177,3 +1183,142 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
+@@ -1177,3 +1183,166 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
          d2d_command_list_write_field(&data, &command->src_rect, src_rect, sizeof(*src_rect));
      }
  }
 +
-+void d2d_command_list_draw_command(const struct d2d_command *command, struct d2d_device_context *context) {
++void d2d_command_list_draw_command(const struct d2d_command *command,
++        struct d2d_device_context *context, const D2D1_MATRIX_3X2_F *offset)
++{
 +    TRACE("command %p, context %p\n", command, context);
 +
 +    switch (command->op)
@@ -54,7 +56,11 @@ index 6c830d2660e..f7e9664092f 100644
 +        case D2D_COMMAND_SET_TRANSFORM:
 +        {
 +            const struct d2d_command_set_transform *c = (void *) command;
-+            ID2D1DeviceContext6_SetTransform(&context->ID2D1DeviceContext6_iface, &c->transform);
++            D2D1_MATRIX_3X2_F transform = c->transform;
++
++            /* The list is replayed at an offset from where it was recorded. */
++            d2d_matrix_multiply(&transform, offset);
++            ID2D1DeviceContext6_SetTransform(&context->ID2D1DeviceContext6_iface, &transform);
 +            break;
 +        }
 +        case D2D_COMMAND_SET_PRIMITIVE_BLEND:
@@ -141,13 +147,29 @@ index 6c830d2660e..f7e9664092f 100644
 +    }
 +}
 +
-+void d2d_command_list_draw(ID2D1CommandList *iface, struct d2d_device_context *context) {
++void d2d_command_list_draw(ID2D1CommandList *iface, struct d2d_device_context *context,
++        const D2D1_POINT_2F *origin)
++{
 +    struct d2d_command_list *command_list = impl_from_ID2D1CommandList(iface);
++    D2D1_DRAWING_STATE_DESCRIPTION1 prev_state;
++    D2D1_MATRIX_3X2_F offset;
 +    const void *data, *end;
 +
-+    TRACE("iface %p, context %p\n", iface, context);
++    TRACE("iface %p, context %p, origin %p\n", iface, context, origin);
 +
 +    if (command_list->state != D2D_COMMAND_LIST_STATE_CLOSED) return;
++
++    offset._11 = 1.0f;
++    offset._12 = 0.0f;
++    offset._21 = 0.0f;
++    offset._22 = 1.0f;
++    offset._31 = origin ? origin->x : 0.0f;
++    offset._32 = origin ? origin->y : 0.0f;
++
++    /* Drawing a list is not supposed to disturb the state of the context it
++     * is drawn on, but replaying it sets the state the list recorded. */
++    prev_state = context->drawing_state;
++    ID2D1DeviceContext6_SetTransform(&context->ID2D1DeviceContext6_iface, &offset);
 +
 +    data = command_list->data;
 +    end = (char *)command_list->data + command_list->size;
@@ -155,8 +177,10 @@ index 6c830d2660e..f7e9664092f 100644
 +    {
 +        const struct d2d_command *command = data;
 +
-+        d2d_command_list_draw_command(command, context);
++        d2d_command_list_draw_command(command, context, &offset);
 +
 +        data = (char *)data + command->size;
 +    }
++
++    context->drawing_state = prev_state;
 +}

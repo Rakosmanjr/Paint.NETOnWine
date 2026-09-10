@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..2f26c5a5c70 100644
+index 552d6d4c24c..4c782eb3b58 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -2117,7 +2117,7 @@ index 552d6d4c24c..2f26c5a5c70 100644
 +    }
 +    else if (SUCCEEDED(ID2D1Image_QueryInterface(image, &IID_ID2D1CommandList, (void **)&command_list)))
 +    {
-+        d2d_command_list_draw(command_list, context);
++        d2d_command_list_draw(command_list, context, target_offset);
 +
 +        ID2D1CommandList_Release(command_list);
 +        context->composite_mode = prev_composite_mode;
