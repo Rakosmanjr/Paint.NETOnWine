@@ -1,9 +1,9 @@
 diff --git a/dlls/dcomp/private.h b/dlls/dcomp/private.h
 new file mode 100644
-index 00000000000..4e550739c15
+index 00000000000..19deebdd78c
 --- /dev/null
 +++ b/dlls/dcomp/private.h
-@@ -0,0 +1,81 @@
+@@ -0,0 +1,105 @@
 +#ifndef __WINE_DCOMP_PRIVATE_H
 +#define __WINE_DCOMP_PRIVATE_H
 +
@@ -24,6 +24,30 @@ index 00000000000..4e550739c15
 +#include "unknwn.h"
 +#include "weakreference.h"
 +#include "dxgi.h"
++
++/* A swap chain created for composition presents to a composition engine
++ * rather than to a window, and its back buffer is not where the frames it
++ * presented can be read: with a discard swap effect there is only one and
++ * the application draws into it continuously, so reading it gives whatever
++ * it holds part way through a frame. A Direct3D implementation that keeps
++ * those frames for a compositor offers them through this. */
++DEFINE_GUID(IID_IDXGIVkCompositionSwapChain, 0xaed91093,0xe02e,0x458c,0xbd,0xef,0xa9,0x7d,0xa1,0xa7,0xe6,0xd3);
++
++typedef struct IDXGIVkCompositionSwapChain IDXGIVkCompositionSwapChain;
++
++typedef struct IDXGIVkCompositionSwapChainVtbl
++{
++    HRESULT (STDMETHODCALLTYPE *QueryInterface)( IDXGIVkCompositionSwapChain *This, REFIID iid, void **out );
++    ULONG (STDMETHODCALLTYPE *AddRef)( IDXGIVkCompositionSwapChain *This );
++    ULONG (STDMETHODCALLTYPE *Release)( IDXGIVkCompositionSwapChain *This );
++    /* Returns the texture holding the frame presented last. */
++    HRESULT (STDMETHODCALLTYPE *GetFrontBuffer)( IDXGIVkCompositionSwapChain *This, REFIID iid, void **buffer );
++} IDXGIVkCompositionSwapChainVtbl;
++
++struct IDXGIVkCompositionSwapChain
++{
++    const IDXGIVkCompositionSwapChainVtbl *lpVtbl;
++};
 +#include "d3d11_4.h"
 +#include "wine/list.h"
 +

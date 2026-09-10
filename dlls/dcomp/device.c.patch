@@ -1,5 +1,5 @@
 diff --git a/dlls/dcomp/device.c b/dlls/dcomp/device.c
-index 2744d758e91..9f12797c388 100644
+index 2744d758e91..d018d0c9997 100644
 --- a/dlls/dcomp/device.c
 +++ b/dlls/dcomp/device.c
 @@ -15,16 +15,44 @@
@@ -47,7 +47,7 @@ index 2744d758e91..9f12797c388 100644
  HRESULT WINAPI DCompositionCreateDevice(IDXGIDevice *dxgi_device, REFIID iid, void **device)
  {
      FIXME("%p, %s, %p.\n", dxgi_device, debugstr_guid(iid), device);
-@@ -45,3 +73,2228 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
+@@ -45,3 +73,2244 @@ HRESULT WINAPI DCompositionCreateDevice3(IUnknown *rendering_device, REFIID iid,
  
      return E_NOTIMPL;
  }
@@ -1994,6 +1994,7 @@ index 2744d758e91..9f12797c388 100644
 +    D3D11_MAPPED_SUBRESOURCE map;
 +    ID3D11DeviceContext *context;
 +    ID3D11Multithread *multithread = NULL;
++    IDXGIVkCompositionSwapChain *composition;
 +    IDXGISwapChain *swapchain;
 +    BITMAPINFO info = {{0}};
 +    UINT present_count;
@@ -2021,11 +2022,26 @@ index 2744d758e91..9f12797c388 100644
 +    }
 +    surface->composited_present = present_count;
 +
-+    hr = IDXGISwapChain_GetBuffer( swapchain, 0, &IID_ID3D11Texture2D, (void **)&buffer );
++    /* Ask for the frame the swap chain presented rather than the buffer the
++     * application is drawing into, which is only ever part of a frame. */
++    if (SUCCEEDED(IDXGISwapChain_QueryInterface( swapchain, &IID_IDXGIVkCompositionSwapChain,
++                                                 (void **)&composition )))
++    {
++        hr = composition->lpVtbl->GetFrontBuffer( composition, &IID_ID3D11Texture2D, (void **)&buffer );
++        composition->lpVtbl->Release( composition );
++    }
++    else
++    {
++        static BOOL once;
++        if (!once++)
++            FIXME( "No composition swap chain interface, drawing the back buffer instead.\n" );
++        hr = IDXGISwapChain_GetBuffer( swapchain, 0, &IID_ID3D11Texture2D, (void **)&buffer );
++    }
++
 +    IDXGISwapChain_Release( swapchain );
 +    if (FAILED(hr))
 +    {
-+        WARN( "Failed to get swap chain buffer, hr %#lx.\n", hr );
++        WARN( "Failed to get the presented frame, hr %#lx.\n", hr );
 +        return;
 +    }
 +
