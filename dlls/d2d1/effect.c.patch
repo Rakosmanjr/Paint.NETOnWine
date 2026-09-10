@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..4993d0adfdd 100644
+index c298aeca93d..45bf40f07eb 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -1749,7 +1749,15 @@ index c298aeca93d..4993d0adfdd 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3589,8 +4802,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3564,6 +4777,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+     object->ID2D1Image_iface.lpVtbl = &d2d_effect_image_vtbl;
+     object->refcount = 1;
+     object->effect_context = effect_context;
++    object->id = *effect_id;
+ 
+     /* Create properties */
+     d2d_effect_duplicate_properties(object, &object->properties, reg->properties);
+@@ -3589,8 +4803,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -1766,7 +1774,7 @@ index c298aeca93d..4993d0adfdd 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +4824,21 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +4825,21 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  
