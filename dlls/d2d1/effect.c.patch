@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..2f8945a9021 100644
+index c298aeca93d..4993d0adfdd 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -390,22 +390,11 @@ index c298aeca93d..2f8945a9021 100644
  static HRESULT d2d_effect_create_impl(IUnknown **effect_impl, const void *props,
          size_t props_size)
  {
-@@ -1202,150 +1553,782 @@ static const D2D1_PROPERTY_BINDING _3d_perspective_transform_bindings[] =
-     { L"Rotation", BINDING_RW(_3d_perspective_transform, rotation) },
- };
+@@ -1213,139 +1564,771 @@ static HRESULT __stdcall _3d_perspective_transform_factory(IUnknown **effect)
+     return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+ }
  
--static HRESULT __stdcall _3d_perspective_transform_factory(IUnknown **effect)
-+static HRESULT __stdcall _3d_perspective_transform_factory(IUnknown **effect)
-+{
-+    static const struct _3d_perspective_transform_properties properties =
-+    {
-+        .interpolation_mode = D2D1_3DPERSPECTIVETRANSFORM_INTERPOLATION_MODE_LINEAR,
-+        .border_mode = D2D1_BORDER_MODE_SOFT,
-+        .depth = 1000.0f,
-+    };
-+    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
-+}
-+
+-static const WCHAR composite_description[] =
 +static const WCHAR composite_description[] =
 +L"<?xml version='1.0'?>                                                   \
 +  <Effect>                                                                \
@@ -800,18 +789,10 @@ index c298aeca93d..2f8945a9021 100644
 +};
 +
 +static HRESULT __stdcall unpremultiply_factory(IUnknown **effect)
- {
--    static const struct _3d_perspective_transform_properties properties =
--    {
--        .interpolation_mode = D2D1_3DPERSPECTIVETRANSFORM_INTERPOLATION_MODE_LINEAR,
--        .border_mode = D2D1_BORDER_MODE_SOFT,
--        .depth = 1000.0f,
--    };
--    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++{
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_unpremultiply_impl_vtbl, NULL, 0);
- }
- 
--static const WCHAR composite_description[] =
++}
++
 +static const WCHAR opacity_description[] =
  L"<?xml version='1.0'?>                                                   \
    <Effect>                                                                \
@@ -1177,7 +1158,8 @@ index c298aeca93d..2f8945a9021 100644
 +EFFECT_PROPERTY_RW(emboss, direction, FLOAT)
 +
 +static const D2D1_PROPERTY_BINDING emboss_bindings[] =
-+{
+ {
+-    return d2d_effect_create_impl(effect, NULL, 0);
 +    { L"Height", BINDING_RW(emboss, height) },
 +    { L"Direction", BINDING_RW(emboss, direction) },
 +};
@@ -1236,8 +1218,7 @@ index c298aeca93d..2f8945a9021 100644
 +};
 +
 +static HRESULT __stdcall emboss_factory(IUnknown **effect)
- {
--    return d2d_effect_create_impl(effect, NULL, 0);
++{
 +    static const struct emboss_properties properties =
 +    {
 +        .height = 1.0f,
@@ -1510,12 +1491,36 @@ index c298aeca93d..2f8945a9021 100644
      {
          ID2D1EffectContext_AddRef(iface);
          *out = iface;
-@@ -2425,15 +3486,19 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_GetMaximumSupportedFeatureLe
+@@ -2423,17 +3484,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
+ static HRESULT STDMETHODCALLTYPE d2d_effect_context_GetMaximumSupportedFeatureLevel(ID2D1EffectContext *iface,
+         const D3D_FEATURE_LEVEL *levels, UINT32 level_count, D3D_FEATURE_LEVEL *max_level)
  {
-     FIXME("iface %p, levels %p, level_count %u, max_level %p stub!\n", iface, levels, level_count, max_level);
+-    FIXME("iface %p, levels %p, level_count %u, max_level %p stub!\n", iface, levels, level_count, max_level);
++    struct d2d_effect_context *effect_context = impl_from_ID2D1EffectContext(iface);
++    D3D_FEATURE_LEVEL device_level, best = 0;
++    unsigned int i;
  
 -    return E_NOTIMPL;
-+    *max_level = D3D_FEATURE_LEVEL_12_2;
++    TRACE("iface %p, levels %p, level_count %u, max_level %p.\n", iface, levels, level_count, max_level);
++
++    if (!levels || !level_count || !max_level)
++        return E_INVALIDARG;
++
++    device_level = ID3D11Device1_GetFeatureLevel(effect_context->device_context->d3d_device);
++
++    /* An effect asks which of the levels it can work with the device reaches.
++     * Claiming one it does not leaves the effect building shaders the device
++     * will not take. */
++    for (i = 0; i < level_count; ++i)
++    {
++        if (levels[i] <= device_level && levels[i] > best)
++            best = levels[i];
++    }
++
++    if (!best)
++        return D2DERR_INSUFFICIENT_DEVICE_CAPABILITIES;
++
++    *max_level = best;
 +    return S_OK;
  }
  
@@ -1533,7 +1538,7 @@ index c298aeca93d..2f8945a9021 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateBlendTransform(ID2D1EffectContext *iface,
-@@ -2740,6 +3805,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
+@@ -2740,6 +3826,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
      if (effect->graph)
          ID2D1TransformGraph_Release(&effect->graph->ID2D1TransformGraph_iface);
      d2d_effect_properties_cleanup(&effect->properties);
@@ -1542,7 +1547,7 @@ index c298aeca93d..2f8945a9021 100644
      if (effect->impl)
          ID2D1EffectImpl_Release(effect->impl);
  }
-@@ -2968,7 +4035,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
+@@ -2968,7 +4056,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
  
          if (SUCCEEDED(hr = d2d_transform_graph_create(count, &effect->graph)))
          {
@@ -1551,7 +1556,7 @@ index c298aeca93d..2f8945a9021 100644
                  WARN("Failed to set a new transform graph, hr %#lx.\n", hr);
          }
      }
-@@ -3366,7 +4433,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
+@@ -3366,7 +4454,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
      TRACE("iface %p refcount %lu.\n", iface, refcount);
  
      if (!refcount)
@@ -1562,7 +1567,7 @@ index c298aeca93d..2f8945a9021 100644
  
      return refcount;
  }
-@@ -3376,7 +4446,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
+@@ -3376,7 +4467,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
  {
      FIXME("iface %p, index %u stub.\n", iface, index);
  
@@ -1571,7 +1576,7 @@ index c298aeca93d..2f8945a9021 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *iface,
-@@ -3384,7 +4454,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
+@@ -3384,7 +4475,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
  {
      FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
  
@@ -1580,7 +1585,7 @@ index c298aeca93d..2f8945a9021 100644
  }
  
  static void STDMETHODCALLTYPE d2d_draw_info_SetCached(ID2D1DrawInfo *iface, BOOL is_cached)
-@@ -3401,9 +4471,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
+@@ -3401,9 +4492,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetPixelShaderConstantBuffer(ID2D1DrawInfo *iface,
          const BYTE *buffer, UINT32 size)
  {
@@ -1613,7 +1618,7 @@ index c298aeca93d..2f8945a9021 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
-@@ -3526,14 +4617,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3526,14 +4638,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          }
          else
          {
@@ -1644,7 +1649,7 @@ index c298aeca93d..2f8945a9021 100644
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect)
  {
-@@ -3543,11 +4648,98 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3543,11 +4669,98 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -1744,7 +1749,7 @@ index c298aeca93d..2f8945a9021 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3589,8 +4781,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3589,8 +4802,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -1761,7 +1766,7 @@ index c298aeca93d..2f8945a9021 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +4803,21 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +4824,21 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  
