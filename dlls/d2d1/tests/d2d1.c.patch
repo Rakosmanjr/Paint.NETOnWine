@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..be1cc44db63 100644
+index 94aa4586184..f1dd031ad02 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -5866,7 +5866,6 @@ static void test_shared_bitmap(BOOL d3d11)
@@ -625,15 +625,25 @@ index 94aa4586184..be1cc44db63 100644
          }
      }
  
-@@ -14087,7 +14578,6 @@ static void test_effect_flood(BOOL d3d11)
+@@ -14087,9 +14578,7 @@ static void test_effect_flood(BOOL d3d11)
      ID2D1Effect_GetOutput(effect, &output);
  
      hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
 -    todo_wine
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-     todo_wine
+-    todo_wine
      ok(compare_rect(&bounds, -bound, -bound, bound, bound, 0),
-@@ -15114,7 +15604,6 @@ static void test_border_transform(BOOL d3d11)
+             "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
+             bounds.left, bounds.top, bounds.right, bounds.bottom);
+@@ -14110,7 +14599,6 @@ static void test_effect_flood(BOOL d3d11)
+     hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+     match = compare_surface(&ctx, "6527ec83b4039c895b50f9b3e144fe0cf90d1889");
+-    todo_wine
+     ok(match, "Surface does not match.\n");
+ 
+     ID2D1Image_Release(output);
+@@ -15114,7 +15602,6 @@ static void test_border_transform(BOOL d3d11)
      todo_wine
      ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
      hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
@@ -641,7 +651,7 @@ index 94aa4586184..be1cc44db63 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      /* Set extend mode */
-@@ -16723,7 +17212,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16723,7 +17210,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      get_surface_readback(&ctx, &rb);
      colour = get_readback_colour(&rb, 0, 0);
      expected_colour = 0x661a334c;
@@ -650,7 +660,7 @@ index 94aa4586184..be1cc44db63 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17224,319 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17222,319 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -970,7 +980,7 @@ index 94aa4586184..be1cc44db63 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +19159,12 @@ START_TEST(d2d1)
+@@ -18357,6 +19157,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -983,7 +993,7 @@ index 94aa4586184..be1cc44db63 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +19188,7 @@ START_TEST(d2d1)
+@@ -18380,6 +19186,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -991,7 +1001,7 @@ index 94aa4586184..be1cc44db63 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18408,6 +19217,8 @@ START_TEST(d2d1)
+@@ -18408,6 +19215,8 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
