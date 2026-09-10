@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..b3acb149c6a 100644
+index 94aa4586184..7b2b34832b9 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -5866,7 +5866,6 @@ static void test_shared_bitmap(BOOL d3d11)
@@ -484,7 +484,7 @@ index 94aa4586184..b3acb149c6a 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17135,201 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17135,319 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -683,10 +683,128 @@ index 94aa4586184..b3acb149c6a 100644
 +    release_test_context(&ctx);
 +}
 +
++static void test_effect_command_list_input(BOOL d3d11)
++{
++    static const WCHAR *description =
++        L"<?xml version='1.0'?>                                                       \
++            <Effect>                                                                  \
++                <Property name='DisplayName' type='string' value='Passthrough'/>      \
++                <Property name='Author'      type='string' value='The Wine Project'/> \
++                <Property name='Category'    type='string' value='Test'/>             \
++                <Property name='Description' type='string' value='Test effect.'/>     \
++                <Inputs>                                                              \
++                    <Input name='Source'/>                                            \
++                    <Input name='Source2'/>                                           \
++                </Inputs>                                                             \
++            </Effect>                                                                 \
++        ";
++
++    static const DWORD green = 0xff00ff00;
++
++    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
++    ID2D1CommandList *command_list;
++    ID2D1SolidColorBrush *brush;
++    struct d2d1_test_context ctx;
++    struct resource_readback rb;
++    ID2D1DeviceContext *context;
++    ID2D1Image *target, *output;
++    ID2D1Factory1 *factory;
++    D2D1_COLOR_F colour_f;
++    ID2D1Bitmap1 *bitmap;
++    ID2D1Effect *effect;
++    D2D1_RECT_F rect;
++    D2D1_SIZE_U size;
++    DWORD colour;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    context = ctx.context;
++    if (!(factory = ctx.factory1))
++    {
++        win_skip("ID2D1Factory1 is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    hr = ID2D1DeviceContext_CreateCommandList(context, &command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    /* Record a red square at the origin. */
++    ID2D1DeviceContext_GetTarget(context, &target);
++    ID2D1DeviceContext_SetTarget(context, (ID2D1Image *)command_list);
++    ID2D1DeviceContext_BeginDraw(context);
++    set_color(&colour_f, 1.0f, 0.0f, 0.0f, 1.0f);
++    hr = ID2D1DeviceContext_CreateSolidColorBrush(context, &colour_f, NULL, &brush);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    set_rect(&rect, 0.0f, 0.0f, 16.0f, 16.0f);
++    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)brush);
++    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1DeviceContext_SetTarget(context, target);
++    if (target)
++        ID2D1Image_Release(target);
++
++    /* "You must call Close before the command list is used as an input to
++     * an effect." */
++    hr = ID2D1CommandList_Close(command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    /* Passing input 1 through, so that the input is reached through the
++     * graph rather than by being the effect's first input. */
++    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, description,
++            NULL, 0, passthrough1_effect_impl_create);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    set_size_u(&size, 1, 1);
++    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
++    bitmap_desc.dpiX = 96.0f;
++    bitmap_desc.dpiY = 96.0f;
++    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
++    bitmap_desc.colorContext = NULL;
++    hr = ID2D1DeviceContext_CreateBitmap(context, size, &green, sizeof(green), &bitmap_desc, &bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    /* "A command list is an ID2D1Image, and can be used as an effect
++     * input." */
++    ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
++    ID2D1Effect_SetInput(effect, 1, (ID2D1Image *)command_list, FALSE);
++    ID2D1Effect_GetOutput(effect, &output);
++
++    ID2D1DeviceContext_BeginDraw(context);
++    ID2D1DeviceContext_Clear(context, NULL);
++    ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
++    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    get_surface_readback(&ctx, &rb);
++    colour = get_readback_colour(&rb, 8, 8);
++    ok(compare_colour(colour, 0xffff0000, 1),
++            "Got unexpected colour 0x%08lx inside the recorded square.\n", colour);
++    colour = get_readback_colour(&rb, 24, 24);
++    ok(compare_colour(colour, 0x00000000, 1),
++            "Got unexpected colour 0x%08lx outside the recorded square.\n", colour);
++    release_resource_readback(&rb);
++
++    ID2D1Image_Release(output);
++    ID2D1Effect_Release(effect);
++    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1Bitmap1_Release(bitmap);
++    ID2D1SolidColorBrush_Release(brush);
++    ID2D1CommandList_Release(command_list);
++    release_test_context(&ctx);
++}
++
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +18952,12 @@ START_TEST(d2d1)
+@@ -18357,6 +19070,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -699,11 +817,12 @@ index 94aa4586184..b3acb149c6a 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18408,6 +19009,7 @@ START_TEST(d2d1)
+@@ -18408,6 +19127,8 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
 +    queue_test(test_effect_passthrough_graph);
++    queue_test(test_effect_command_list_input);
      queue_d3d10_test(test_get_effect_properties);
      queue_test(test_effect_vertex_buffer);
      queue_d3d10_test(test_compute_geometry_area);
