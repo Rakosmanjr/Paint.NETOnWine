@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..c9d377366d8 100644
+index 94aa4586184..cc5d09d2f06 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -856,7 +856,7 @@ index 94aa4586184..c9d377366d8 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17404,412 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17404,490 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -1020,6 +1020,84 @@ index 94aa4586184..c9d377366d8 100644
 +
 +    set_matrix_identity(&transform);
 +    ID2D1DeviceContext_SetTransform(context, &transform);
++    ID2D1SolidColorBrush_Release(brush);
++    ID2D1CommandList_Release(command_list);
++    release_test_context(&ctx);
++}
++
++static void test_command_list_target_state(BOOL d3d11)
++{
++    ID2D1SolidColorBrush *brush;
++    ID2D1CommandList *command_list;
++    struct d2d1_test_context ctx;
++    struct resource_readback rb;
++    ID2D1DeviceContext *context;
++    D2D1_MATRIX_3X2_F transform;
++    ID2D1Image *target;
++    D2D1_COLOR_F colour;
++    D2D1_RECT_F rect;
++    DWORD value;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    context = ctx.context;
++    if (!ctx.factory1)
++    {
++        win_skip("Command lists are not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    hr = ID2D1DeviceContext_CreateCommandList(context, &command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    /* A command list can be made the target part way through a draw. The
++     * state the context is in at that point is the state the commands
++     * recorded after it are drawn with; setting a target does not reset it. */
++    ID2D1DeviceContext_BeginDraw(context);
++    ID2D1DeviceContext_Clear(context, NULL);
++
++    set_matrix_identity(&transform);
++    translate_matrix(&transform, 100.0f, 50.0f);
++    ID2D1DeviceContext_SetTransform(context, &transform);
++
++    ID2D1DeviceContext_GetTarget(context, &target);
++    ID2D1DeviceContext_SetTarget(context, (ID2D1Image *)command_list);
++
++    set_color(&colour, 1.0f, 0.0f, 0.0f, 1.0f);
++    hr = ID2D1DeviceContext_CreateSolidColorBrush(context, &colour, NULL, &brush);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    set_rect(&rect, 0.0f, 0.0f, 16.0f, 16.0f);
++    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)brush);
++
++    ID2D1DeviceContext_SetTarget(context, target);
++    if (target)
++        ID2D1Image_Release(target);
++    set_matrix_identity(&transform);
++    ID2D1DeviceContext_SetTransform(context, &transform);
++    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1CommandList_Close(command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    ID2D1DeviceContext_BeginDraw(context);
++    ID2D1DeviceContext_Clear(context, NULL);
++    ID2D1DeviceContext_DrawImage(context, (ID2D1Image *)command_list, NULL, NULL, 0, 0);
++    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    get_surface_readback(&ctx, &rb);
++    value = get_readback_colour(&rb, 108, 58);
++    ok(compare_colour(value, 0xffff0000, 1),
++            "Got unexpected colour 0x%08lx where the recorded transform put it.\n", value);
++    value = get_readback_colour(&rb, 8, 8);
++    ok(compare_colour(value, 0x00000000, 1),
++            "Got unexpected colour 0x%08lx at the untransformed position.\n", value);
++    release_resource_readback(&rb);
++
 +    ID2D1SolidColorBrush_Release(brush);
 +    ID2D1CommandList_Release(command_list);
 +    release_test_context(&ctx);
@@ -1269,7 +1347,7 @@ index 94aa4586184..c9d377366d8 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +19432,12 @@ START_TEST(d2d1)
+@@ -18357,6 +19510,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -1282,7 +1360,7 @@ index 94aa4586184..c9d377366d8 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +19461,7 @@ START_TEST(d2d1)
+@@ -18380,6 +19539,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -1290,12 +1368,13 @@ index 94aa4586184..c9d377366d8 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18408,6 +19490,10 @@ START_TEST(d2d1)
+@@ -18408,6 +19568,11 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
 +    queue_test(test_effect_input_bounds);
 +    queue_test(test_command_list_transform);
++    queue_test(test_command_list_target_state);
 +    queue_test(test_effect_passthrough_graph);
 +    queue_test(test_effect_command_list_input);
      queue_d3d10_test(test_get_effect_properties);
