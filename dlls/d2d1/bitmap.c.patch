@@ -1,8 +1,56 @@
 diff --git a/dlls/d2d1/bitmap.c b/dlls/d2d1/bitmap.c
-index c6ab60c1bc4..a2527a4bbf4 100644
+index c6ab60c1bc4..8eb25c67a67 100644
 --- a/dlls/d2d1/bitmap.c
 +++ b/dlls/d2d1/bitmap.c
-@@ -680,11 +680,123 @@ HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid,
+@@ -357,11 +357,7 @@ static const struct ID2D1Bitmap1Vtbl d2d_bitmap_vtbl =
+     d2d_bitmap_Unmap,
+ };
+ 
+-static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
+-{
+-    unsigned int i;
+-
+-    static const D2D1_PIXEL_FORMAT supported_formats[] =
++static const D2D1_PIXEL_FORMAT supported_formats[] =
+     {
+         {DXGI_FORMAT_R32G32B32A32_FLOAT,    D2D1_ALPHA_MODE_PREMULTIPLIED},
+         {DXGI_FORMAT_R32G32B32A32_FLOAT,    D2D1_ALPHA_MODE_IGNORE       },
+@@ -380,7 +376,11 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
+         {DXGI_FORMAT_B8G8R8X8_UNORM,        D2D1_ALPHA_MODE_IGNORE       },
+         {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   D2D1_ALPHA_MODE_PREMULTIPLIED},
+         {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   D2D1_ALPHA_MODE_IGNORE       },
+-    };
++};
++
++static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
++{
++    unsigned int i;
+ 
+     for (i = 0; i < ARRAY_SIZE(supported_formats); ++i)
+     {
+@@ -392,6 +392,21 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
+     return FALSE;
+ }
+ 
++/* A format the context can render to, whatever alpha mode it is paired
++ * with. */
++BOOL d2d_dxgi_format_supported(DXGI_FORMAT format)
++{
++    unsigned int i;
++
++    for (i = 0; i < ARRAY_SIZE(supported_formats); ++i)
++    {
++        if (supported_formats[i].format == format)
++            return TRUE;
++    }
++
++    return FALSE;
++}
++
+ static void d2d_bitmap_init(struct d2d_bitmap *bitmap, struct d2d_device_context *context,
+         ID3D11Resource *resource, D2D1_SIZE_U size, const D2D1_BITMAP_PROPERTIES1 *desc)
+ {
+@@ -680,11 +695,123 @@ HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid,
          return S_OK;
      }
  
@@ -126,7 +174,7 @@ index c6ab60c1bc4..a2527a4bbf4 100644
  HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap)
  {
-@@ -710,6 +822,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -710,6 +837,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
          {&GUID_WICPixelFormat32bppPRGBA, {DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}},
          {&GUID_WICPixelFormat32bppBGR,   {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
          {&GUID_WICPixelFormat32bppRGB,   {DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
@@ -135,7 +183,7 @@ index c6ab60c1bc4..a2527a4bbf4 100644
      };
  
      if (FAILED(hr = IWICBitmapSource_GetSize(bitmap_source, &size.width, &size.height)))
-@@ -742,6 +856,7 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -742,6 +871,7 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
      {
          if (IsEqualGUID(&wic_format, format_lookup[i].wic))
          {
@@ -143,7 +191,7 @@ index c6ab60c1bc4..a2527a4bbf4 100644
              d2d_format = &format_lookup[i].d2d;
              break;
          }
-@@ -750,7 +865,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -750,7 +880,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
      if (!d2d_format)
      {
          WARN("Unsupported WIC bitmap format %s.\n", debugstr_guid(&wic_format));
@@ -153,7 +201,7 @@ index c6ab60c1bc4..a2527a4bbf4 100644
      }
  
      if (bitmap_desc.pixelFormat.format == DXGI_FORMAT_UNKNOWN)
-@@ -760,10 +876,17 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -760,10 +891,17 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
  
      switch (bitmap_desc.pixelFormat.format)
      {

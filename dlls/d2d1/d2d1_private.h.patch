@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..6bf58ecb671 100644
+index ba6cea78e06..3040c33a69d 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
 @@ -125,6 +125,11 @@ struct d2d_ps_cb
@@ -87,7 +87,7 @@ index ba6cea78e06..6bf58ecb671 100644
      ID3D11SamplerState *sampler_states
              [D2D_SAMPLER_INTERPOLATION_MODE_COUNT]
              [D2D_SAMPLER_EXTEND_MODE_COUNT]
-@@ -219,6 +269,10 @@ struct d2d_device_context
+@@ -219,6 +269,12 @@ struct d2d_device_context
      D2D1_RENDER_TARGET_PROPERTIES desc;
      D2D1_SIZE_U pixel_size;
      struct d2d_clip_stack clip_stack;
@@ -95,10 +95,17 @@ index ba6cea78e06..6bf58ecb671 100644
 +
 +    /* Transparent black outside an effect input's rectangle. */
 +    ID3D11SamplerState *effect_sampler_state;
++
++    D2D1_RENDERING_CONTROLS rendering_controls;
  
      struct d2d_indexed_objects vertex_buffers;
  };
-@@ -455,6 +509,8 @@ HRESULT d2d_bitmap_create(struct d2d_device_context *context, D2D1_SIZE_U size,
+@@ -451,10 +507,13 @@ struct d2d_bitmap
+     D2D1_BITMAP_OPTIONS options;
+ };
+ 
++BOOL d2d_dxgi_format_supported(DXGI_FORMAT format);
+ HRESULT d2d_bitmap_create(struct d2d_device_context *context, D2D1_SIZE_U size, const void *src_data,
          UINT32 pitch, const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
  HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid, void *data,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
@@ -107,7 +114,7 @@ index ba6cea78e06..6bf58ecb671 100644
  HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
  unsigned int d2d_get_bitmap_options_for_surface(IDXGISurface *surface);
-@@ -803,12 +859,17 @@ struct d2d_transform
+@@ -803,12 +862,17 @@ struct d2d_transform
          D2D1_RECT_L bounds;
      };
  
@@ -125,7 +132,7 @@ index ba6cea78e06..6bf58ecb671 100644
  };
  
  struct d2d_render_info
-@@ -818,6 +879,8 @@ struct d2d_render_info
+@@ -818,6 +882,8 @@ struct d2d_render_info
  
      unsigned int mask;
      GUID pixel_shader;
@@ -134,7 +141,7 @@ index ba6cea78e06..6bf58ecb671 100644
  };
  
  struct d2d_transform_node
-@@ -858,7 +921,12 @@ struct d2d_effect
+@@ -858,7 +924,12 @@ struct d2d_effect
      ID2D1Image ID2D1Image_iface;
      LONG refcount;
  
@@ -147,7 +154,7 @@ index ba6cea78e06..6bf58ecb671 100644
      struct d2d_effect_properties properties;
      struct d2d_effect_context *effect_context;
      struct d2d_transform_graph *graph;
-@@ -869,6 +937,8 @@ struct d2d_effect
+@@ -869,6 +940,8 @@ struct d2d_effect
  
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect);
@@ -156,7 +163,7 @@ index ba6cea78e06..6bf58ecb671 100644
  void d2d_effect_init_properties(struct d2d_effect *effect, struct d2d_effect_properties *properties);
  HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
          UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
-@@ -964,6 +1034,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
+@@ -964,6 +1037,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
  void d2d_command_list_push_layer(struct d2d_command_list *command_list, const struct d2d_device_context *context,
          const D2D1_LAYER_PARAMETERS1 *params);
  void d2d_command_list_pop_layer(struct d2d_command_list *command_list);
@@ -165,7 +172,7 @@ index ba6cea78e06..6bf58ecb671 100644
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1119,4 +1191,20 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1119,4 +1194,20 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  

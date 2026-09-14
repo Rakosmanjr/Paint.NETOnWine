@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..6fcd34ce731 100644
+index 94aa4586184..c317d9b0717 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -856,7 +856,7 @@ index 94aa4586184..6fcd34ce731 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17404,633 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17404,723 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -1280,6 +1280,96 @@ index 94aa4586184..6fcd34ce731 100644
 +    return S_OK;
 +}
 +
++static void test_is_dxgi_format_supported(BOOL d3d11)
++{
++    static const struct
++    {
++        DXGI_FORMAT format;
++        BOOL supported;
++    }
++    tests[] =
++    {
++        {DXGI_FORMAT_B8G8R8A8_UNORM,      TRUE},
++        {DXGI_FORMAT_R8G8B8A8_UNORM,      TRUE},
++        {DXGI_FORMAT_A8_UNORM,            TRUE},
++        {DXGI_FORMAT_R16G16B16A16_FLOAT,  TRUE},
++        {DXGI_FORMAT_R32G32B32A32_FLOAT,  TRUE},
++        {DXGI_FORMAT_R8G8B8A8_TYPELESS,   FALSE},
++        {DXGI_FORMAT_B8G8R8A8_TYPELESS,   FALSE},
++        {DXGI_FORMAT_R8G8B8A8_UINT,       FALSE},
++        {DXGI_FORMAT_R8G8B8A8_SINT,       FALSE},
++        {DXGI_FORMAT_UNKNOWN,             FALSE},
++    };
++
++    struct d2d1_test_context ctx;
++    ID2D1DeviceContext *context;
++    unsigned int i;
++    BOOL supported;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    if (!(context = ctx.context))
++    {
++        win_skip("ID2D1DeviceContext is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    for (i = 0; i < ARRAY_SIZE(tests); ++i)
++    {
++        winetest_push_context("format %#x", tests[i].format);
++        supported = ID2D1DeviceContext_IsDxgiFormatSupported(context, tests[i].format);
++        ok(supported == tests[i].supported, "Got unexpected result %d.\n", supported);
++        winetest_pop_context();
++    }
++
++    release_test_context(&ctx);
++}
++
++static void test_rendering_controls(BOOL d3d11)
++{
++    D2D1_RENDERING_CONTROLS controls, previous;
++    struct d2d1_test_context ctx;
++    ID2D1DeviceContext *context;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    if (!(context = ctx.context))
++    {
++        win_skip("ID2D1DeviceContext is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    /* The caller reads these to decide how to divide its own work, so they
++     * have to be written even when nothing has been set. */
++    memset(&previous, 0xcd, sizeof(previous));
++    ID2D1DeviceContext_GetRenderingControls(context, &previous);
++    ok(previous.bufferPrecision != 0xcdcdcdcd, "Buffer precision was not set.\n");
++    ok(previous.tileSize.width != 0xcdcdcdcd && previous.tileSize.width,
++            "Got unexpected tile width %u.\n", previous.tileSize.width);
++    ok(previous.tileSize.height != 0xcdcdcdcd && previous.tileSize.height,
++            "Got unexpected tile height %u.\n", previous.tileSize.height);
++
++    controls.bufferPrecision = D2D1_BUFFER_PRECISION_16BPC_FLOAT;
++    controls.tileSize.width = 64;
++    controls.tileSize.height = 32;
++    ID2D1DeviceContext_SetRenderingControls(context, &controls);
++
++    memset(&controls, 0xcd, sizeof(controls));
++    ID2D1DeviceContext_GetRenderingControls(context, &controls);
++    ok(controls.bufferPrecision == D2D1_BUFFER_PRECISION_16BPC_FLOAT,
++            "Got unexpected buffer precision %#x.\n", controls.bufferPrecision);
++    ok(controls.tileSize.width == 64, "Got unexpected tile width %u.\n", controls.tileSize.width);
++    ok(controls.tileSize.height == 32, "Got unexpected tile height %u.\n", controls.tileSize.height);
++
++    ID2D1DeviceContext_SetRenderingControls(context, &previous);
++
++    release_test_context(&ctx);
++}
++
 +static void test_effect_prepare_for_render_graph(BOOL d3d11)
 +{
 +    static const WCHAR *description =
@@ -1490,7 +1580,7 @@ index 94aa4586184..6fcd34ce731 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +19653,12 @@ START_TEST(d2d1)
+@@ -18357,6 +19743,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -1503,7 +1593,7 @@ index 94aa4586184..6fcd34ce731 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +19682,7 @@ START_TEST(d2d1)
+@@ -18380,6 +19772,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -1511,7 +1601,7 @@ index 94aa4586184..6fcd34ce731 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18408,6 +19711,12 @@ START_TEST(d2d1)
+@@ -18408,6 +19801,14 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
@@ -1519,6 +1609,8 @@ index 94aa4586184..6fcd34ce731 100644
 +    queue_test(test_command_list_transform);
 +    queue_test(test_command_list_target_state);
 +    queue_test(test_effect_passthrough_graph);
++    queue_test(test_is_dxgi_format_supported);
++    queue_test(test_rendering_controls);
 +    queue_test(test_effect_prepare_for_render_graph);
 +    queue_test(test_effect_command_list_input);
      queue_d3d10_test(test_get_effect_properties);
