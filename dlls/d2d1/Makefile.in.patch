@@ -1,0 +1,12 @@
+diff --git a/dlls/d2d1/Makefile.in b/dlls/d2d1/Makefile.in
+index 73add39286b..d20f2e89bd0 100644
+--- a/dlls/d2d1/Makefile.in
++++ b/dlls/d2d1/Makefile.in
+@@ -19,6 +19,7 @@ SOURCES = \
+ 	hwnd_render_target.c \
+ 	layer.c \
+ 	mesh.c \
++	rasterizer.c \
+ 	sprite_batch.c \
+ 	state_block.c \
+ 	stroke.c \

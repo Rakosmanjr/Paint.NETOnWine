@@ -1,20 +1,113 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..2ebab6d5de9 100644
+index ba6cea78e06..4512c6c87f5 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
-@@ -125,6 +125,11 @@ struct d2d_ps_cb
+@@ -69,6 +69,56 @@ struct d2d_clip_stack
+     size_t count;
+ };
+ 
++/* A polyline is a run of points; a figure that was closed, or any figure
++ * that is filled, joins its last point back to its first. */
++struct d2d_polyline
++{
++    size_t start;
++    size_t count;
++    bool closed;
++    bool hollow;
++};
++
++/* A set of polylines, and a sink that collects the flattened figures of a
++ * geometry into one. */
++struct d2d_polyline_set
++{
++    ID2D1SimplifiedGeometrySink ID2D1SimplifiedGeometrySink_iface;
++
++    D2D1_POINT_2F *points;
++    size_t points_size;
++    size_t point_count;
++
++    struct d2d_polyline *lines;
++    size_t lines_size;
++    size_t line_count;
++
++    D2D1_FILL_MODE fill_mode;
++    float tolerance;
++    HRESULT hr;
++};
++
++void d2d_polyline_set_init(struct d2d_polyline_set *set, float tolerance);
++void d2d_polyline_set_cleanup(struct d2d_polyline_set *set);
++HRESULT d2d_polyline_set_add_geometry(struct d2d_polyline_set *set, ID2D1Geometry *geometry,
++        const D2D1_MATRIX_3X2_F *transform, float tolerance);
++bool d2d_polyline_set_is_rect(const struct d2d_polyline_set *set, D2D1_RECT_F *rect);
++
++/* 8-bit coverage of the pixels in a rectangle of the target. */
++struct d2d_coverage_mask
++{
++    BYTE *data;
++    unsigned int x;
++    unsigned int y;
++    unsigned int width;
++    unsigned int height;
++};
++
++HRESULT d2d_polyline_set_rasterize(const struct d2d_polyline_set *set, const RECT *clip,
++        struct d2d_coverage_mask *mask);
++void d2d_coverage_mask_cleanup(struct d2d_coverage_mask *mask);
++float d2d_coverage_snap(float v);
++
+ struct d2d_error_state
+ {
+     HRESULT code;
+@@ -116,19 +166,42 @@ struct d2d_brush_cb
+     } u;
+ };
+ 
++/* How the pixel shader derives the coverage of a pixel. */
++enum d2d_coverage_mode
++{
++    /* Every pixel the rasterizer produces is fully covered. */
++    D2D_COVERAGE_MODE_NONE = 0,
++    /* A mask texture holds the coverage; coverage_rect is its position and
++     * size in the target. */
++    D2D_COVERAGE_MODE_MASK = 1,
++    /* The shape is the axis-aligned rectangle coverage_rect, in target
++     * pixels, and the coverage is computed from its edges. */
++    D2D_COVERAGE_MODE_RECT = 2,
++};
++
++struct d2d_vec4
++{
++    float x, y, z, w;
++};
++
+ struct d2d_ps_cb
+ {
+     BOOL outline;
+     BOOL is_arc;
+-    BOOL pad[2];
++    unsigned int coverage_mode;
++    float pad;
++    struct d2d_vec4 coverage_rect;
++    /* The axis-aligned clip, in target pixels; antialiased coverage is
++     * scaled by its coverage of the pixel. */
++    struct d2d_vec4 clip_rect;
+     struct d2d_brush_cb colour_brush;
      struct d2d_brush_cb opacity_brush;
  };
  
+-struct d2d_vec4
+-{
+-    float x, y, z, w;
+-};
 +/* D2D allows an effect up to 8 inputs. */
 +#define D2D_EFFECT_MAX_INPUTS 8
 +/* Bounds recursion when evaluating a transform graph. */
 +#define D2D_EFFECT_MAX_GRAPH_DEPTH 32
-+
- struct d2d_vec4
+ 
+ struct d2d_vs_cb
  {
-     float x, y, z, w;
-@@ -143,6 +148,7 @@ struct d2d_vs_cb
+@@ -143,6 +216,7 @@ struct d2d_vs_cb
  
  struct d2d_device_context_ops
  {
@@ -22,7 +115,7 @@ index ba6cea78e06..2ebab6d5de9 100644
      HRESULT (*device_context_present)(IUnknown *outer_unknown);
  };
  
-@@ -170,6 +176,38 @@ struct d2d_indexed_objects
+@@ -170,6 +244,38 @@ struct d2d_indexed_objects
      size_t count;
  };
  
@@ -61,7 +154,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  struct d2d_device_context
  {
      ID2D1DeviceContext6 ID2D1DeviceContext6_iface;
-@@ -198,6 +236,12 @@ struct d2d_device_context
+@@ -198,6 +304,12 @@ struct d2d_device_context
          HDC hdc;
      } target;
      struct d2d_shape_resources shape_resources[D2D_SHAPE_TYPE_COUNT];
@@ -74,7 +167,7 @@ index ba6cea78e06..2ebab6d5de9 100644
      ID3D11Buffer *vs_cb;
      ID3D11PixelShader *ps;
      ID3D11Buffer *ps_cb;
-@@ -206,6 +250,12 @@ struct d2d_device_context
+@@ -206,6 +318,12 @@ struct d2d_device_context
      ID3D11Buffer *vb;
      ID3D11RasterizerState *rs;
      ID3D11BlendState *bs;
@@ -87,7 +180,7 @@ index ba6cea78e06..2ebab6d5de9 100644
      ID3D11SamplerState *sampler_states
              [D2D_SAMPLER_INTERPOLATION_MODE_COUNT]
              [D2D_SAMPLER_EXTEND_MODE_COUNT]
-@@ -219,6 +269,12 @@ struct d2d_device_context
+@@ -219,8 +337,21 @@ struct d2d_device_context
      D2D1_RENDER_TARGET_PROPERTIES desc;
      D2D1_SIZE_U pixel_size;
      struct d2d_clip_stack clip_stack;
@@ -99,8 +192,17 @@ index ba6cea78e06..2ebab6d5de9 100644
 +    D2D1_RENDERING_CONTROLS rendering_controls;
  
      struct d2d_indexed_objects vertex_buffers;
++
++    /* Antialiased coverage masks are uploaded through this texture, which
++     * is grown as needed. */
++    ID3D11Texture2D *coverage_texture;
++    ID3D11ShaderResourceView *coverage_srv;
++    unsigned int coverage_width;
++    unsigned int coverage_height;
  };
-@@ -451,10 +507,13 @@ struct d2d_bitmap
+ 
+ HRESULT d2d_d3d_create_render_target(struct d2d_device *device, IDXGISurface *surface, IUnknown *outer_unknown,
+@@ -451,10 +582,13 @@ struct d2d_bitmap
      D2D1_BITMAP_OPTIONS options;
  };
  
@@ -114,7 +216,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
  unsigned int d2d_get_bitmap_options_for_surface(IDXGISurface *surface);
-@@ -803,12 +862,17 @@ struct d2d_transform
+@@ -803,12 +937,17 @@ struct d2d_transform
          D2D1_RECT_L bounds;
      };
  
@@ -132,7 +234,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  };
  
  struct d2d_render_info
-@@ -818,6 +882,8 @@ struct d2d_render_info
+@@ -818,6 +957,8 @@ struct d2d_render_info
  
      unsigned int mask;
      GUID pixel_shader;
@@ -141,7 +243,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  };
  
  struct d2d_transform_node
-@@ -858,17 +924,31 @@ struct d2d_effect
+@@ -858,17 +999,31 @@ struct d2d_effect
      ID2D1Image ID2D1Image_iface;
      LONG refcount;
  
@@ -173,7 +275,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  void d2d_effect_init_properties(struct d2d_effect *effect, struct d2d_effect_properties *properties);
  HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
          UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
-@@ -964,6 +1044,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
+@@ -964,6 +1119,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
  void d2d_command_list_push_layer(struct d2d_command_list *command_list, const struct d2d_device_context *context,
          const D2D1_LAYER_PARAMETERS1 *params);
  void d2d_command_list_pop_layer(struct d2d_command_list *command_list);
@@ -182,7 +284,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1031,6 +1113,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
+@@ -1031,6 +1188,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
      return p0->x * p1->x + p0->y * p1->y;
  }
  
@@ -203,7 +305,7 @@ index ba6cea78e06..2ebab6d5de9 100644
  static inline void d2d_point_transform(D2D1_POINT_2F *dst, const D2D1_MATRIX_3X2_F *matrix, float x, float y)
  {
      dst->x = x * matrix->_11 + y * matrix->_21 + matrix->_31;
-@@ -1119,4 +1215,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1119,4 +1290,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  
