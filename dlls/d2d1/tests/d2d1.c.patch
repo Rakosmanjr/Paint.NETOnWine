@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..2997b84838d 100644
+index 94aa4586184..99ec5c44162 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -858,38 +858,69 @@ index 94aa4586184..2997b84838d 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17407,1739 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,55 +17407,1788 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
+-static void test_get_effect_properties(BOOL d3d11)
 +static HRESULT STDMETHODCALLTYPE passthrough_effect_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph, UINT32 index)
-+{
+ {
+-    ID2D1Properties *properties, *properties2;
+-    struct d2d1_test_context ctx;
+-    D2D_VECTOR_4F rect, rect2;
+-    D2D1_PROPERTY_TYPE type;
+-    ID2D1Factory1 *factory;
+-    UINT32 count, index;
+-    WCHAR buffW[64];
+-    ULONG refcount;
 +    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
-+    HRESULT hr;
-+
+     HRESULT hr;
+ 
+-    if (!init_test_context(&ctx, d3d11))
+-        return;
 +    ID2D1EffectContext_AddRef(effect_impl->effect_context = context);
-+
+ 
+-    factory = ctx.factory1;
+-    if (!factory)
+-    {
+-        release_test_context(&ctx);
+-        return;
+-    }
 +    /* "index: The index of the input that will be passed through." Out of
 +     * range is rejected and leaves the graph alone. */
 +    hr = ID2D1TransformGraph_SetPassthroughGraph(graph, 2);
 +    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
-+
+ 
+-    hr = ID2D1Factory1_GetEffectProperties(factory, &GUID_NULL, &properties);
+-    ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
 +    return ID2D1TransformGraph_SetPassthroughGraph(graph, index);
 +}
-+
+ 
+-    hr = ID2D1Factory1_GetEffectProperties(factory, &CLSID_D2D1Crop, &properties);
+-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+-    refcount = get_refcount(properties);
+-    ok(refcount == 2, "Unexpected refcount %lu.\n", refcount);
 +static HRESULT STDMETHODCALLTYPE passthrough0_effect_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
 +{
 +    return passthrough_effect_impl_Initialize(iface, context, graph, 0);
 +}
-+
+ 
+-    hr = ID2D1Factory1_GetEffectProperties(factory, &CLSID_D2D1Crop, &properties2);
+-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+-    ok(properties == properties2, "Unexpected instance.\n");
+-    refcount = get_refcount(properties);
+-    ok(refcount == 3, "Unexpected refcount %lu.\n", refcount);
+-    ID2D1Properties_Release(properties2);
 +static HRESULT STDMETHODCALLTYPE passthrough1_effect_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
 +{
 +    return passthrough_effect_impl_Initialize(iface, context, graph, 1);
 +}
-+
+ 
+-    count = ID2D1Properties_GetPropertyCount(properties);
+-    ok(count == 2, "Unexpected property count %u.\n", count);
 +static const ID2D1EffectImplVtbl passthrough0_effect_impl_vtbl =
 +{
 +    effect_impl_QueryInterface,
@@ -899,7 +930,10 @@ index 94aa4586184..2997b84838d 100644
 +    effect_impl_PrepareForRender,
 +    effect_impl_SetGraph,
 +};
-+
+ 
+-    hr = ID2D1Properties_GetPropertyName(properties, 0, buffW, ARRAY_SIZE(buffW));
+-    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
+-    ok(!wcscmp(buffW, L"Rect"), "Unexpected name %s.\n", debugstr_w(buffW));
 +static const ID2D1EffectImplVtbl passthrough1_effect_impl_vtbl =
 +{
 +    effect_impl_QueryInterface,
@@ -909,11 +943,15 @@ index 94aa4586184..2997b84838d 100644
 +    effect_impl_PrepareForRender,
 +    effect_impl_SetGraph,
 +};
-+
+ 
+-    count = ID2D1Properties_GetPropertyNameLength(properties, 0);
+-    ok(count == 4, "Unexpected name length %u.\n", count);
 +static HRESULT passthrough_effect_impl_create(IUnknown **effect_impl, const ID2D1EffectImplVtbl *vtbl)
 +{
 +    struct effect_impl *object;
-+
+ 
+-    type = ID2D1Properties_GetType(properties, 0);
+-    ok(type == D2D1_PROPERTY_TYPE_VECTOR4, "Unexpected property type %u.\n", type);
 +    if (!(object = calloc(1, sizeof(*object))))
 +        return E_OUTOFMEMORY;
 +
@@ -2595,10 +2633,172 @@ index 94aa4586184..2997b84838d 100644
 +    release_test_context(&ctx);
 +}
 +
- static void test_get_effect_properties(BOOL d3d11)
++static void test_get_effect_properties(BOOL d3d11)
++{
++    ID2D1Properties *properties, *properties2;
++    struct d2d1_test_context ctx;
++    D2D_VECTOR_4F rect, rect2;
++    D2D1_PROPERTY_TYPE type;
++    ID2D1Factory1 *factory;
++    UINT32 count, index;
++    WCHAR buffW[64];
++    ULONG refcount;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    factory = ctx.factory1;
++    if (!factory)
++    {
++        release_test_context(&ctx);
++        return;
++    }
++
++    hr = ID2D1Factory1_GetEffectProperties(factory, &GUID_NULL, &properties);
++    ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1Factory1_GetEffectProperties(factory, &CLSID_D2D1Crop, &properties);
++    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
++    refcount = get_refcount(properties);
++    ok(refcount == 2, "Unexpected refcount %lu.\n", refcount);
++
++    hr = ID2D1Factory1_GetEffectProperties(factory, &CLSID_D2D1Crop, &properties2);
++    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
++    ok(properties == properties2, "Unexpected instance.\n");
++    refcount = get_refcount(properties);
++    ok(refcount == 3, "Unexpected refcount %lu.\n", refcount);
++    ID2D1Properties_Release(properties2);
++
++    count = ID2D1Properties_GetPropertyCount(properties);
++    ok(count == 2, "Unexpected property count %u.\n", count);
++
++    hr = ID2D1Properties_GetPropertyName(properties, 0, buffW, ARRAY_SIZE(buffW));
++    ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
++    ok(!wcscmp(buffW, L"Rect"), "Unexpected name %s.\n", debugstr_w(buffW));
++
++    count = ID2D1Properties_GetPropertyNameLength(properties, 0);
++    ok(count == 4, "Unexpected name length %u.\n", count);
++
++    type = ID2D1Properties_GetType(properties, 0);
++    ok(type == D2D1_PROPERTY_TYPE_VECTOR4, "Unexpected property type %u.\n", type);
+ 
+     index = ID2D1Properties_GetPropertyIndex(properties, L"prop");
+     ok(index == ~0u, "Unexpected index %u.\n", index);
+@@ -17186,6 +19591,112 @@ static D2D1_PIXEL_FORMAT get_wic_target_format(const D2D1_PIXEL_FORMAT *target_f
+     return format;
+ }
+ 
++static DWORD get_wic_bitmap_pixel(IWICBitmap *bitmap, unsigned int x, unsigned int y)
++{
++    WICRect rect = {x, y, 1, 1};
++    DWORD pixel = 0xdeadbeef;
++    HRESULT hr;
++
++    hr = IWICBitmap_CopyPixels(bitmap, &rect, sizeof(pixel), sizeof(pixel), (BYTE *)&pixel);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    return pixel;
++}
++
++static void set_wic_bitmap_pixel(IWICBitmap *bitmap, unsigned int x, unsigned int y, DWORD pixel)
++{
++    WICRect rect = {x, y, 1, 1};
++    IWICBitmapLock *lock;
++    UINT size;
++    BYTE *data;
++    HRESULT hr;
++
++    hr = IWICBitmap_Lock(bitmap, &rect, WICBitmapLockWrite, &lock);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    hr = IWICBitmapLock_GetDataPointer(lock, &size, &data);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    *(DWORD *)data = pixel;
++    IWICBitmapLock_Release(lock);
++}
++
++/* A WIC bitmap render target draws over what the bitmap already holds,
++ * including changes made to it between draws. */
++static void test_wic_target_content(BOOL d3d11)
++{
++    D2D1_RENDER_TARGET_PROPERTIES desc;
++    IWICImagingFactory *wic_factory;
++    ID2D1SolidColorBrush *brush;
++    struct d2d1_test_context ctx;
++    IWICBitmap *wic_bitmap;
++    DWORD pixels[16 * 16];
++    ID2D1RenderTarget *rt;
++    D2D1_COLOR_F colour;
++    D2D1_RECT_F rect;
++    unsigned int i;
++    DWORD pixel;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
++    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
++            &IID_IWICImagingFactory, (void **)&wic_factory);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    for (i = 0; i < ARRAY_SIZE(pixels); ++i)
++        pixels[i] = 0xff00ff00;
++    hr = IWICImagingFactory_CreateBitmapFromMemory(wic_factory, 16, 16, &GUID_WICPixelFormat32bppPBGRA,
++            16 * sizeof(*pixels), sizeof(pixels), (BYTE *)pixels, &wic_bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    IWICImagingFactory_Release(wic_factory);
++
++    desc.type = D2D1_RENDER_TARGET_TYPE_DEFAULT;
++    desc.pixelFormat.format = DXGI_FORMAT_UNKNOWN;
++    desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_UNKNOWN;
++    desc.dpiX = 96.0f;
++    desc.dpiY = 96.0f;
++    desc.usage = D2D1_RENDER_TARGET_USAGE_NONE;
++    desc.minLevel = D2D1_FEATURE_LEVEL_DEFAULT;
++    hr = ID2D1Factory_CreateWicBitmapRenderTarget(ctx.factory, wic_bitmap, &desc, &rt);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    set_color(&colour, 1.0f, 0.0f, 0.0f, 1.0f);
++    hr = ID2D1RenderTarget_CreateSolidColorBrush(rt, &colour, NULL, &brush);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    ID2D1RenderTarget_BeginDraw(rt);
++    set_rect(&rect, 0.0f, 0.0f, 4.0f, 4.0f);
++    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)brush);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    pixel = get_wic_bitmap_pixel(wic_bitmap, 2, 2);
++    ok(pixel == 0xffff0000, "Got unexpected pixel 0x%08lx inside the fill.\n", pixel);
++    pixel = get_wic_bitmap_pixel(wic_bitmap, 10, 10);
++    ok(pixel == 0xff00ff00, "Got unexpected pixel 0x%08lx outside the fill.\n", pixel);
++
++    /* A pixel changed through the bitmap itself survives the next draw. */
++    set_wic_bitmap_pixel(wic_bitmap, 12, 12, 0xff0000ff);
++    ID2D1RenderTarget_BeginDraw(rt);
++    set_rect(&rect, 4.0f, 4.0f, 8.0f, 8.0f);
++    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)brush);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    pixel = get_wic_bitmap_pixel(wic_bitmap, 12, 12);
++    ok(pixel == 0xff0000ff, "Got unexpected pixel 0x%08lx changed between draws.\n", pixel);
++    pixel = get_wic_bitmap_pixel(wic_bitmap, 2, 2);
++    ok(pixel == 0xffff0000, "Got unexpected pixel 0x%08lx from the first draw.\n", pixel);
++    pixel = get_wic_bitmap_pixel(wic_bitmap, 6, 6);
++    ok(pixel == 0xffff0000, "Got unexpected pixel 0x%08lx from the second draw.\n", pixel);
++    pixel = get_wic_bitmap_pixel(wic_bitmap, 10, 2);
++    ok(pixel == 0xff00ff00, "Got unexpected pixel 0x%08lx never drawn to.\n", pixel);
++
++    ID2D1SolidColorBrush_Release(brush);
++    ID2D1RenderTarget_Release(rt);
++    IWICBitmap_Release(wic_bitmap);
++    release_test_context(&ctx);
++}
++
+ static void test_wic_target_format(BOOL d3d11)
  {
-     ID2D1Properties *properties, *properties2;
-@@ -18357,6 +20762,12 @@ START_TEST(d2d1)
+     static const struct
+@@ -18357,6 +20868,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -2611,7 +2811,7 @@ index 94aa4586184..2997b84838d 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +20791,7 @@ START_TEST(d2d1)
+@@ -18380,6 +20897,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -2619,7 +2819,7 @@ index 94aa4586184..2997b84838d 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18399,6 +20811,7 @@ START_TEST(d2d1)
+@@ -18399,6 +20917,7 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_3d_transform);
      queue_d3d10_test(test_effect_color_management);
      queue_test(test_transform_graph);
@@ -2627,7 +2827,7 @@ index 94aa4586184..2997b84838d 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,6 +20821,18 @@ START_TEST(d2d1)
+@@ -18408,10 +20927,23 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
@@ -2646,3 +2846,8 @@ index 94aa4586184..2997b84838d 100644
      queue_d3d10_test(test_get_effect_properties);
      queue_test(test_effect_vertex_buffer);
      queue_d3d10_test(test_compute_geometry_area);
+     queue_test(test_wic_target_format);
++    queue_test(test_wic_target_content);
+     queue_d3d10_test(test_effect_blob_property);
+     queue_test(test_get_dxgi_device);
+     queue_test(test_no_target);
