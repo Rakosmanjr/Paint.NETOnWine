@@ -1,0 +1,12 @@
+diff --git a/dlls/dwrite/dwrite_private.h b/dlls/dwrite/dwrite_private.h
+index 2d7987d5159..a7f24da3d33 100644
+--- a/dlls/dwrite/dwrite_private.h
++++ b/dlls/dwrite/dwrite_private.h
+@@ -363,6 +363,7 @@ extern HRESULT create_fontfacereference(IDWriteFactory7 *factory, IDWriteFontFil
+ extern HRESULT factory_get_cached_fontface(IDWriteFactory7 *factory, IDWriteFontFile * const *files, UINT32 num_files,
+         DWRITE_FONT_SIMULATIONS simulations, struct list **cache, REFIID riid, void **obj);
+ extern void factory_detach_fontcollection(IDWriteFactory7 *factory, IDWriteFontCollection3 *collection);
++extern BOOL fontcollection_try_addref(IDWriteFontCollection3 *collection);
+ extern void factory_detach_gdiinterop(IDWriteFactory7 *factory, IDWriteGdiInterop1 *interop);
+ extern struct fontfacecached *factory_cache_fontface(IDWriteFactory7 *factory, struct list *fontfaces,
+         IDWriteFontFace5 *fontface);
