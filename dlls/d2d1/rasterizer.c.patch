@@ -1,9 +1,9 @@
 diff --git a/dlls/d2d1/rasterizer.c b/dlls/d2d1/rasterizer.c
 new file mode 100644
-index 00000000000..6a84f30f927
+index 00000000000..5ab19c7242c
 --- /dev/null
 +++ b/dlls/d2d1/rasterizer.c
-@@ -0,0 +1,593 @@
+@@ -0,0 +1,951 @@
 +/*
 + * Copyright 2026 James Rakos
 + *
@@ -80,6 +80,32 @@ index 00000000000..6a84f30f927
 +static D2D1_POINT_2F d2d_polyline_set_last_point(const struct d2d_polyline_set *set)
 +{
 +    return set->points[set->point_count - 1];
++}
++
++/* Polygons are built with a consistent orientation so that a non-zero fill
++ * of their union is the union of their interiors. */
++static void d2d_polyline_set_orient_last(struct d2d_polyline_set *set)
++{
++    struct d2d_polyline *line = &set->lines[set->line_count - 1];
++    D2D1_POINT_2F *points = &set->points[line->start];
++    size_t i, j;
++    float area = 0.0f;
++
++    for (i = 0; i < line->count; ++i)
++    {
++        const D2D1_POINT_2F *a = &points[i], *b = &points[(i + 1) % line->count];
++        area += a->x * b->y - b->x * a->y;
++    }
++
++    if (area >= 0.0f)
++        return;
++
++    for (i = 0, j = line->count - 1; i < j; ++i, --j)
++    {
++        D2D1_POINT_2F tmp = points[i];
++        points[i] = points[j];
++        points[j] = tmp;
++    }
 +}
 +
 +static HRESULT STDMETHODCALLTYPE d2d_polyline_sink_QueryInterface(ID2D1SimplifiedGeometrySink *iface,
@@ -296,6 +322,338 @@ index 00000000000..6a84f30f927
 +    rect->bottom = max(p[0].y, p[2].y);
 +
 +    return true;
++}
++
++struct d2d_stroke
++{
++    struct d2d_polyline_set *out;
++    const D2D1_STROKE_STYLE_PROPERTIES1 *style;
++    const D2D1_MATRIX_3X2_F *transform;
++    float half_width;
++    /* Flattening tolerance in the output space. */
++    float tolerance;
++};
++
++static bool d2d_stroke_add_point(struct d2d_stroke *stroke, float x, float y)
++{
++    D2D1_POINT_2F p;
++
++    d2d_point_transform(&p, stroke->transform, x, y);
++    return d2d_polyline_set_add_point(stroke->out, p);
++}
++
++static bool d2d_stroke_begin(struct d2d_stroke *stroke)
++{
++    return d2d_polyline_set_begin(stroke->out, true, false);
++}
++
++static void d2d_stroke_end(struct d2d_stroke *stroke)
++{
++    d2d_polyline_set_orient_last(stroke->out);
++}
++
++/* Points along the circle of the stroke's half-width around the centre,
++ * from angle "from" through "sweep" radians, ending with the end point. The
++ * arc is built from cubic Béziers of at most a quarter turn each, flattened
++ * in the output space the same way a geometry's curves are. */
++static bool d2d_stroke_add_arc(struct d2d_stroke *stroke, const D2D1_POINT_2F *centre, float from, float sweep)
++{
++    unsigned int i, count;
++    float h = stroke->half_width, a0, a1, k;
++    D2D1_BEZIER_SEGMENT b;
++    D2D1_POINT_2F p0;
++
++    count = max(1, ceilf(fabsf(sweep) / (M_PI / 2.0f) - 1e-3f));
++    for (i = 0; i < count; ++i)
++    {
++        a0 = from + sweep * i / count;
++        a1 = from + sweep * (i + 1) / count;
++        k = 4.0f / 3.0f * tanf((a1 - a0) / 4.0f);
++        d2d_point_transform(&p0, stroke->transform, centre->x + h * cosf(a0), centre->y + h * sinf(a0));
++        d2d_point_transform(&b.point1, stroke->transform,
++                centre->x + h * (cosf(a0) - k * sinf(a0)), centre->y + h * (sinf(a0) + k * cosf(a0)));
++        d2d_point_transform(&b.point2, stroke->transform,
++                centre->x + h * (cosf(a1) + k * sinf(a1)), centre->y + h * (sinf(a1) - k * cosf(a1)));
++        d2d_point_transform(&b.point3, stroke->transform, centre->x + h * cosf(a1), centre->y + h * sinf(a1));
++        d2d_polyline_set_flatten_cubic(stroke->out, &p0, &b, stroke->tolerance);
++        if (FAILED(stroke->out->hr))
++            return false;
++    }
++
++    return true;
++}
++
++static bool d2d_stroke_add_segment(struct d2d_stroke *stroke, const D2D1_POINT_2F *p0,
++        const D2D1_POINT_2F *p1, const D2D1_POINT_2F *n)
++{
++    float h = stroke->half_width;
++
++    return d2d_stroke_begin(stroke)
++            && d2d_stroke_add_point(stroke, p0->x + n->x * h, p0->y + n->y * h)
++            && d2d_stroke_add_point(stroke, p1->x + n->x * h, p1->y + n->y * h)
++            && d2d_stroke_add_point(stroke, p1->x - n->x * h, p1->y - n->y * h)
++            && d2d_stroke_add_point(stroke, p0->x - n->x * h, p0->y - n->y * h)
++            && (d2d_stroke_end(stroke), true);
++}
++
++/* The cap at "p" of a segment leaving it in direction "d". */
++static bool d2d_stroke_add_cap(struct d2d_stroke *stroke, D2D1_CAP_STYLE cap,
++        const D2D1_POINT_2F *p, const D2D1_POINT_2F *d)
++{
++    float h = stroke->half_width, nx = -d->y, ny = d->x;
++
++    switch (cap)
++    {
++        case D2D1_CAP_STYLE_SQUARE:
++            return d2d_stroke_begin(stroke)
++                    && d2d_stroke_add_point(stroke, p->x + nx * h, p->y + ny * h)
++                    && d2d_stroke_add_point(stroke, p->x + nx * h - d->x * h, p->y + ny * h - d->y * h)
++                    && d2d_stroke_add_point(stroke, p->x - nx * h - d->x * h, p->y - ny * h - d->y * h)
++                    && d2d_stroke_add_point(stroke, p->x - nx * h, p->y - ny * h)
++                    && (d2d_stroke_end(stroke), true);
++
++        case D2D1_CAP_STYLE_ROUND:
++            /* n is d turned a quarter turn, so a further half turn from n
++             * passes through -d. */
++            return d2d_stroke_begin(stroke)
++                    && d2d_stroke_add_point(stroke, p->x + nx * h, p->y + ny * h)
++                    && d2d_stroke_add_arc(stroke, p, atan2f(ny, nx), M_PI)
++                    && (d2d_stroke_end(stroke), true);
++
++        case D2D1_CAP_STYLE_TRIANGLE:
++            return d2d_stroke_begin(stroke)
++                    && d2d_stroke_add_point(stroke, p->x + nx * h, p->y + ny * h)
++                    && d2d_stroke_add_point(stroke, p->x - d->x * h, p->y - d->y * h)
++                    && d2d_stroke_add_point(stroke, p->x - nx * h, p->y - ny * h)
++                    && (d2d_stroke_end(stroke), true);
++
++        default:
++            return true;
++    }
++}
++
++/* The join at "p" between a segment arriving in direction "d0" and one
++ * leaving in direction "d1". The segments themselves cover the inside of
++ * the turn; this fills the wedge on the outside. */
++static bool d2d_stroke_add_join(struct d2d_stroke *stroke, const D2D1_POINT_2F *p,
++        const D2D1_POINT_2F *d0, const D2D1_POINT_2F *d1)
++{
++    float h = stroke->half_width, cross, dot, s, l, ratio;
++    D2D1_POINT_2F n0, n1, a, b, m;
++    D2D1_LINE_JOIN join;
++
++    cross = d0->x * d1->y - d0->y * d1->x;
++    dot = d2d_point_dot(d0, d1);
++    if (fabsf(cross) < 1e-6f)
++    {
++        if (dot > 0.0f)
++            return true;
++        /* The path doubles back on itself. A miter would be infinitely
++         * long and a bevel has no area, so only a round join shows: the
++         * half disc beyond the vertex, which is what a round cap of the
++         * arriving segment would draw. */
++        if (stroke->style->lineJoin != D2D1_LINE_JOIN_ROUND)
++            return true;
++        d2d_point_set(&n0, -d0->x, -d0->y);
++        return d2d_stroke_add_cap(stroke, D2D1_CAP_STYLE_ROUND, p, &n0);
++    }
++
++    /* Normals point to the left of the direction of travel, which is the
++     * inside of a left turn. */
++    s = cross > 0.0f ? -1.0f : 1.0f;
++    d2d_point_set(&n0, -d0->y * s, d0->x * s);
++    d2d_point_set(&n1, -d1->y * s, d1->x * s);
++    d2d_point_set(&a, p->x + n0.x * h, p->y + n0.y * h);
++    d2d_point_set(&b, p->x + n1.x * h, p->y + n1.y * h);
++
++    join = stroke->style->lineJoin;
++    if (join == D2D1_LINE_JOIN_MITER || join == D2D1_LINE_JOIN_MITER_OR_BEVEL)
++    {
++        float limit = max(stroke->style->miterLimit, 1.0f);
++
++        /* The miter point lies along n0 + n1, at h / cos(θ/2) from p,
++         * θ being the angle between the normals. The miter limit is the
++         * ratio of that distance to h. */
++        m.x = n0.x + n1.x;
++        m.y = n0.y + n1.y;
++        l = d2d_point_dot(&m, &m);
++        ratio = l > 1e-12f ? 2.0f / sqrtf(l) : INFINITY;
++        if (ratio <= limit)
++        {
++            m.x = p->x + m.x * 2.0f * h / l;
++            m.y = p->y + m.y * 2.0f * h / l;
++            return d2d_stroke_begin(stroke)
++                    && d2d_stroke_add_point(stroke, p->x, p->y)
++                    && d2d_stroke_add_point(stroke, a.x, a.y)
++                    && d2d_stroke_add_point(stroke, m.x, m.y)
++                    && d2d_stroke_add_point(stroke, b.x, b.y)
++                    && (d2d_stroke_end(stroke), true);
++        }
++        if (join == D2D1_LINE_JOIN_MITER && ratio != INFINITY)
++        {
++            /* Beyond the limit a plain miter is cut off at the limit, by a
++             * line perpendicular to the bisector. a and b lie at
++             * h·cos(θ/2) along the bisector, the miter point at ratio·h. */
++            float f = (limit - sqrtf(l) / 2.0f) / (ratio - sqrtf(l) / 2.0f);
++            D2D1_POINT_2F a2, b2;
++
++            m.x = p->x + m.x * 2.0f * h / l;
++            m.y = p->y + m.y * 2.0f * h / l;
++            d2d_point_lerp(&a2, &a, &m, f);
++            d2d_point_lerp(&b2, &b, &m, f);
++            return d2d_stroke_begin(stroke)
++                    && d2d_stroke_add_point(stroke, p->x, p->y)
++                    && d2d_stroke_add_point(stroke, a.x, a.y)
++                    && d2d_stroke_add_point(stroke, a2.x, a2.y)
++                    && d2d_stroke_add_point(stroke, b2.x, b2.y)
++                    && d2d_stroke_add_point(stroke, b.x, b.y)
++                    && (d2d_stroke_end(stroke), true);
++        }
++        join = D2D1_LINE_JOIN_BEVEL;
++    }
++
++    if (join == D2D1_LINE_JOIN_ROUND)
++    {
++        float from = atan2f(n0.y, n0.x), sweep = atan2f(n1.y, n1.x) - from;
++
++        if (sweep > M_PI)
++            sweep -= 2.0f * M_PI;
++        else if (sweep < -M_PI)
++            sweep += 2.0f * M_PI;
++
++        return d2d_stroke_begin(stroke)
++                && d2d_stroke_add_point(stroke, p->x, p->y)
++                && d2d_stroke_add_point(stroke, a.x, a.y)
++                && d2d_stroke_add_arc(stroke, p, from, sweep)
++                && (d2d_stroke_end(stroke), true);
++    }
++
++    return d2d_stroke_begin(stroke)
++            && d2d_stroke_add_point(stroke, p->x, p->y)
++            && d2d_stroke_add_point(stroke, a.x, a.y)
++            && d2d_stroke_add_point(stroke, b.x, b.y)
++            && (d2d_stroke_end(stroke), true);
++}
++
++static bool d2d_stroke_add_polyline(struct d2d_stroke *stroke, const D2D1_POINT_2F *src, size_t src_count, bool closed)
++{
++    D2D1_POINT_2F *points, d, d_prev = {0.0f, 0.0f}, d_first = {0.0f, 0.0f}, n;
++    size_t i, count = 0;
++    bool ret = false;
++    float l;
++
++    if (!(points = malloc(src_count * sizeof(*points))))
++        return false;
++
++    /* Repeated points have no direction; drop them. */
++    for (i = 0; i < src_count; ++i)
++    {
++        if (count && points[count - 1].x == src[i].x && points[count - 1].y == src[i].y)
++            continue;
++        points[count++] = src[i];
++    }
++    if (closed && count > 1 && points[count - 1].x == points[0].x && points[count - 1].y == points[0].y)
++        --count;
++
++    if (count == 1 && !closed)
++    {
++        /* A dot has no direction. A round cap is a disc regardless, and a
++         * square cap is taken to be axis-aligned. */
++        if (stroke->style->startCap == D2D1_CAP_STYLE_ROUND)
++        {
++            ret = d2d_stroke_begin(stroke)
++                    && d2d_stroke_add_arc(stroke, &points[0], 0.0f, 2.0f * M_PI)
++                    && (d2d_stroke_end(stroke), true);
++        }
++        else if (stroke->style->startCap == D2D1_CAP_STYLE_SQUARE)
++        {
++            d2d_point_set(&d, 1.0f, 0.0f);
++            ret = d2d_stroke_add_cap(stroke, D2D1_CAP_STYLE_SQUARE, &points[0], &d);
++            d2d_point_set(&d, -1.0f, 0.0f);
++            ret = ret && d2d_stroke_add_cap(stroke, D2D1_CAP_STYLE_SQUARE, &points[0], &d);
++        }
++        else
++        {
++            ret = true;
++        }
++        goto done;
++    }
++    if (count < 2)
++    {
++        ret = true;
++        goto done;
++    }
++
++    for (i = 0; i + 1 < count || (closed && i < count); ++i)
++    {
++        const D2D1_POINT_2F *p0 = &points[i], *p1 = &points[(i + 1) % count];
++
++        d2d_point_subtract(&d, p1, p0);
++        l = sqrtf(d2d_point_dot(&d, &d));
++        d.x /= l;
++        d.y /= l;
++        d2d_point_set(&n, -d.y, d.x);
++
++        if (!d2d_stroke_add_segment(stroke, p0, p1, &n))
++            goto done;
++
++        if (i)
++        {
++            if (!d2d_stroke_add_join(stroke, p0, &d_prev, &d))
++                goto done;
++        }
++        else
++        {
++            d_first = d;
++            if (!closed && !d2d_stroke_add_cap(stroke, stroke->style->startCap, p0, &d))
++                goto done;
++        }
++        d_prev = d;
++    }
++
++    if (closed)
++        ret = d2d_stroke_add_join(stroke, &points[0], &d_prev, &d_first);
++    else
++    {
++        d2d_point_set(&d, -d_prev.x, -d_prev.y);
++        ret = d2d_stroke_add_cap(stroke, stroke->style->endCap, &points[count - 1], &d);
++    }
++
++done:
++    free(points);
++    return ret;
++}
++
++/* Builds the outline of a stroke along the polylines as a set of overlapping
++ * polygons; their non-zero fill is the stroke. The polylines are in the
++ * space the stroke width applies in, and the result is transformed into
++ * the space it is rasterized in, where "tolerance" applies. */
++HRESULT d2d_polyline_set_stroke(const struct d2d_polyline_set *path, float width,
++        const D2D1_STROKE_STYLE_PROPERTIES1 *style, const D2D1_MATRIX_3X2_F *transform,
++        float tolerance, struct d2d_polyline_set *out)
++{
++    struct d2d_stroke stroke;
++    size_t i;
++
++    out->fill_mode = D2D1_FILL_MODE_WINDING;
++    if (width <= 0.0f)
++        return S_OK;
++
++    stroke.out = out;
++    stroke.style = style;
++    stroke.transform = transform;
++    stroke.half_width = width * 0.5f;
++    stroke.tolerance = tolerance;
++
++    for (i = 0; i < path->line_count; ++i)
++    {
++        const struct d2d_polyline *line = &path->lines[i];
++
++        if (!d2d_stroke_add_polyline(&stroke, &path->points[line->start], line->count, line->closed))
++            return FAILED(out->hr) ? out->hr : E_OUTOFMEMORY;
++    }
++
++    return S_OK;
 +}
 +
 +/* Coordinates are kept in sixteenths of a pixel, relative to the mask's

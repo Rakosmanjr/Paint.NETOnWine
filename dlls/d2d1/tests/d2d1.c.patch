@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..a6576581cab 100644
+index 94aa4586184..a1cb032417a 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -858,7 +858,7 @@ index 94aa4586184..a6576581cab 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,1562 +17407,4206 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,1562 +17407,4412 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -5513,6 +5513,18 @@ index 94aa4586184..a6576581cab 100644
 +    set_point(&points[3], rect->left, rect->bottom);
 +}
 +
++/* A stroked line of the given width, with flat caps. */
++static void coverage_line_polygon(D2D1_POINT_2F *points, D2D1_POINT_2F p0, D2D1_POINT_2F p1, float width)
++{
++    float dx = p1.x - p0.x, dy = p1.y - p0.y, l = sqrtf(dx * dx + dy * dy);
++    float nx = -dy / l * width * 0.5f, ny = dx / l * width * 0.5f;
++
++    set_point(&points[0], p0.x + nx, p0.y + ny);
++    set_point(&points[1], p1.x + nx, p1.y + ny);
++    set_point(&points[2], p1.x - nx, p1.y - ny);
++    set_point(&points[3], p0.x - nx, p0.y - ny);
++}
++
 +/* Curves are flattened by halving a Bézier until its control points are
 + * within the flattening tolerance of being evenly spaced on a line. */
 +static unsigned int coverage_flatten_cubic(D2D1_POINT_2F *points, unsigned int count,
@@ -5626,6 +5638,26 @@ index 94aa4586184..a6576581cab 100644
 +    return geometry;
 +}
 +
++static ID2D1StrokeStyle *create_stroke_style(ID2D1Factory *factory, D2D1_CAP_STYLE cap, D2D1_LINE_JOIN join,
++        float miter_limit)
++{
++    D2D1_STROKE_STYLE_PROPERTIES desc;
++    ID2D1StrokeStyle *style;
++    HRESULT hr;
++
++    desc.startCap = cap;
++    desc.endCap = cap;
++    desc.dashCap = D2D1_CAP_STYLE_FLAT;
++    desc.lineJoin = join;
++    desc.miterLimit = miter_limit;
++    desc.dashStyle = D2D1_DASH_STYLE_SOLID;
++    desc.dashOffset = 0.0f;
++    hr = ID2D1Factory_CreateStrokeStyle(factory, &desc, NULL, 0, &style);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    return style;
++}
++
 +static void test_antialias(BOOL d3d11)
 +{
 +    static const D2D1_RECT_F fraction_rect = {4.40625f, 6.40625f, 6.40625f, 8.40625f};
@@ -5634,12 +5666,26 @@ index 94aa4586184..a6576581cab 100644
 +    static const D2D1_POINT_2F square_cw[] = {{2.0f, 2.0f}, {10.0f, 2.0f}, {10.0f, 10.0f}, {2.0f, 10.0f}};
 +    static const D2D1_POINT_2F square2_cw[] = {{6.0f, 6.0f}, {14.0f, 6.0f}, {14.0f, 14.0f}, {6.0f, 14.0f}};
 +    static const D2D1_POINT_2F square2_ccw[] = {{6.0f, 6.0f}, {6.0f, 14.0f}, {14.0f, 14.0f}, {14.0f, 6.0f}};
++    static const D2D1_POINT_2F corner_path[] = {{2.0f, 2.0f}, {10.0f, 2.0f}, {10.0f, 10.0f}};
++    static const D2D1_POINT_2F miter_corner[] = {{9.0f, 1.0f}, {11.0f, 1.0f}, {11.0f, 3.0f}, {9.0f, 3.0f}};
++    static const D2D1_POINT_2F bevel_corner[] = {{10.0f, 1.0f}, {11.0f, 2.0f}, {10.0f, 2.0f}};
++    static const D2D1_POINT_2F triangle_cap_start[] = {{4.0f, 6.5f}, {2.5f, 8.0f}, {4.0f, 9.5f}};
++    static const D2D1_POINT_2F sharp_path[] = {{2.0f, 12.0f}, {12.0f, 2.0f}, {2.0f, 2.0f}};
++    /* The join at (12, 2): the outer offset points, and the miter point at
++     * 1 / sin(22.5°) stroke widths from the vertex. */
++    static const D2D1_POINT_2F sharp_miter[] = {{12.0f, 2.0f}, {12.70710678f, 2.70710678f},
++            {14.41421356f, 1.0f}, {12.0f, 1.0f}};
++    static const D2D1_POINT_2F sharp_bevel[] = {{12.0f, 2.0f}, {12.70710678f, 2.70710678f}, {12.0f, 1.0f}};
++    /* The miter cut off at twice the half width along the bisector. */
++    static const D2D1_POINT_2F sharp_miter_clipped[] = {{12.0f, 2.0f}, {12.70710678f, 2.70710678f},
++            {13.94494729f, 1.46926627f}, {13.75057084f, 1.0f}, {12.0f, 1.0f}};
++    static const D2D1_POINT_2F triangle_cap_end[] = {{12.0f, 6.5f}, {13.5f, 8.0f}, {12.0f, 9.5f}};
 +    static const D2D1_RECT_F clip_aa = {4.5f, 4.5f, 10.5f, 10.5f};
 +    static const D2D1_RECT_F clip_aliased = {4.4f, 4.4f, 10.6f, 10.6f};
 +    static const DWORD bitmap_data[9] = {0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
 +            0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
 +    D2D1_POINT_2F polygon[4], polygon2[4];
-+    D2D1_POINT_2F circle[COVERAGE_CIRCLE_POINTS];
++    D2D1_POINT_2F circle[COVERAGE_CIRCLE_POINTS], circle2[COVERAGE_CIRCLE_POINTS];
 +    struct coverage_polygon polygons[4];
 +    D2D1_LAYER_PARAMETERS layer_desc;
 +    D2D1_BITMAP_PROPERTIES bitmap_desc;
@@ -5648,8 +5694,10 @@ index 94aa4586184..a6576581cab 100644
 +    ID2D1PathGeometry *geometry;
 +    ID2D1CommandList *command_list;
 +    ID2D1RectangleGeometry *rect_geometry;
++    ID2D1StrokeStyle *style;
 +    D2D1_MATRIX_3X2_F matrix;
 +    ID2D1RenderTarget *rt;
++    D2D1_POINT_2F p0, p1;
 +    D2D1_ELLIPSE ellipse;
 +    ID2D1Bitmap *bitmap;
 +    D2D1_COLOR_F colour;
@@ -5716,9 +5764,7 @@ index 94aa4586184..a6576581cab 100644
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    {
 +        ID2D1GeometrySink *sink;
- 
--    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 3, 1, dests, sources, colors, transforms);
--    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
++
 +        hr = ID2D1PathGeometry_Open(geometry, &sink);
 +        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +        ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
@@ -5740,14 +5786,12 @@ index 94aa4586184..a6576581cab 100644
 +    ID2D1PathGeometry_Release(geometry);
 +    read_coverage(&ctx, pixels, 16, 16);
 +    check_coverage(pixels, 16, 16, 16, polygons, 2, COVERAGE_RULE_NONZERO, NULL, 0);
- 
--    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 3, 0, dests, sources, colors, transforms);
++
 +    hr = ID2D1Factory_CreatePathGeometry(ctx.factory, &geometry);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    {
 +        ID2D1GeometrySink *sink;
- 
--    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 0, dests, sources, colors, transforms);
++
 +        hr = ID2D1PathGeometry_Open(geometry, &sink);
 +        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +        ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_ALTERNATE);
@@ -5765,18 +5809,16 @@ index 94aa4586184..a6576581cab 100644
 +    ID2D1RenderTarget_Clear(rt, &colour);
 +    ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    ID2D1PathGeometry_Release(geometry);
 +    read_coverage(&ctx, pixels, 16, 16);
 +    check_coverage(pixels, 16, 16, 16, polygons, 2, COVERAGE_RULE_EVEN_ODD, NULL, 0);
- 
--    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 2, NULL, NULL, NULL, NULL);
++
 +    hr = ID2D1Factory_CreatePathGeometry(ctx.factory, &geometry);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    {
 +        ID2D1GeometrySink *sink;
- 
--    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 2, dests, sources, colors, transforms);
++
 +        hr = ID2D1PathGeometry_Open(geometry, &sink);
 +        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +        ID2D1GeometrySink_SetFillMode(sink, D2D1_FILL_MODE_WINDING);
@@ -5794,30 +5836,194 @@ index 94aa4586184..a6576581cab 100644
 +    ID2D1RenderTarget_Clear(rt, &colour);
 +    ID2D1RenderTarget_FillGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, NULL);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    ID2D1PathGeometry_Release(geometry);
 +    read_coverage(&ctx, pixels, 16, 16);
 +    polygons[1].points = square2_ccw;
 +    check_coverage(pixels, 16, 16, 16, polygons, 2, COVERAGE_RULE_NONZERO, NULL, 0);
++
++    /* Lines. A one pixel wide line on a pixel boundary covers half of the
++     * pixels on either side. */
++    set_point(&p0, 3.0f, 3.0f);
++    set_point(&p1, 3.0f, 12.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawLine(rt, p0, p1, (ID2D1Brush *)brush, 1.0f, NULL);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    read_coverage(&ctx, pixels, 16, 16);
++    coverage_line_polygon(polygon, p0, p1, 1.0f);
++    polygons[0].points = polygon;
++    polygons[0].count = 4;
++    check_coverage(pixels, 16, 16, 16, polygons, 1, COVERAGE_RULE_NONZERO, NULL, 0);
++
++    set_point(&p0, 2.0f, 2.0f);
++    set_point(&p1, 12.0f, 12.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawLine(rt, p0, p1, (ID2D1Brush *)brush, 1.0f, NULL);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    read_coverage(&ctx, pixels, 16, 16);
++    coverage_line_polygon(polygon, p0, p1, 1.0f);
++    check_coverage(pixels, 16, 16, 16, polygons, 1, COVERAGE_RULE_NONZERO, NULL, 0);
++
++    /* Caps. */
++    set_point(&p0, 4.0f, 8.0f);
++    set_point(&p1, 12.0f, 8.0f);
++    coverage_line_polygon(polygon, p0, p1, 3.0f);
++    polygons[1].points = circle;
++    polygons[1].count = coverage_circle_polygon(circle, 4.0f, 8.0f, 1.5f);
++    polygons[2].points = circle2;
++    polygons[2].count = coverage_circle_polygon(circle2, 12.0f, 8.0f, 1.5f);
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_ROUND, D2D1_LINE_JOIN_MITER, 10.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawLine(rt, p0, p1, (ID2D1Brush *)brush, 3.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    read_coverage(&ctx, pixels, 16, 16);
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 12);
++
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_SQUARE, D2D1_LINE_JOIN_MITER, 10.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawLine(rt, p0, p1, (ID2D1Brush *)brush, 3.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    read_coverage(&ctx, pixels, 16, 16);
++    set_rect(&rect, 2.5f, 6.5f, 13.5f, 9.5f);
++    coverage_rect_polygon(polygon2, &rect);
++    polygons[0].points = polygon2;
++    check_coverage(pixels, 16, 16, 16, polygons, 1, COVERAGE_RULE_NONZERO, NULL, 0);
+ 
+-    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 3, 1, dests, sources, colors, transforms);
+-    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_TRIANGLE, D2D1_LINE_JOIN_MITER, 10.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawLine(rt, p0, p1, (ID2D1Brush *)brush, 3.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    read_coverage(&ctx, pixels, 16, 16);
++    polygons[0].points = polygon;
++    polygons[1].points = triangle_cap_start;
++    polygons[1].count = 3;
++    polygons[2].points = triangle_cap_end;
++    polygons[2].count = 3;
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 0);
++
++    /* Joins. */
++    geometry = create_polygon_geometry(ctx.factory, corner_path, 3, D2D1_FILL_MODE_WINDING, D2D1_FIGURE_END_OPEN);
++    coverage_line_polygon(polygon, corner_path[0], corner_path[1], 2.0f);
++    coverage_line_polygon(polygon2, corner_path[1], corner_path[2], 2.0f);
++    polygons[0].points = polygon;
++    polygons[0].count = 4;
++    polygons[1].points = polygon2;
++    polygons[1].count = 4;
++    polygons[2].points = miter_corner;
++    polygons[2].count = 4;
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 2.0f, NULL);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    read_coverage(&ctx, pixels, 16, 16);
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 0);
+ 
+-    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 3, 0, dests, sources, colors, transforms);
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_BEVEL, 10.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 2.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    read_coverage(&ctx, pixels, 16, 16);
++    polygons[2].points = bevel_corner;
++    polygons[2].count = 3;
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 0);
+ 
+-    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 0, dests, sources, colors, transforms);
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_ROUND, 10.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 2.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    ID2D1PathGeometry_Release(geometry);
++    read_coverage(&ctx, pixels, 16, 16);
++    polygons[2].points = circle;
++    polygons[2].count = coverage_circle_polygon(circle, 10.0f, 2.0f, 1.0f);
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 12);
++
++    /* A sharp corner, within and beyond the miter limit. */
++    geometry = create_polygon_geometry(ctx.factory, sharp_path, 3, D2D1_FILL_MODE_WINDING, D2D1_FIGURE_END_OPEN);
++    coverage_line_polygon(polygon, sharp_path[0], sharp_path[1], 2.0f);
++    coverage_line_polygon(polygon2, sharp_path[1], sharp_path[2], 2.0f);
++    polygons[2].points = sharp_miter;
++    polygons[2].count = 4;
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 2.0f, NULL);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    read_coverage(&ctx, pixels, 16, 16);
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 0);
+ 
+-    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 2, NULL, NULL, NULL, NULL);
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER_OR_BEVEL, 2.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 2.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    read_coverage(&ctx, pixels, 16, 16);
++    polygons[2].points = sharp_bevel;
++    polygons[2].count = 3;
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 0);
+ 
+-    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 2, dests, sources, colors, transforms);
++    /* A plain miter join beyond the limit is cut off at the limit. */
++    style = create_stroke_style(ctx.factory, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 2.0f);
++    ID2D1RenderTarget_BeginDraw(rt);
++    ID2D1RenderTarget_Clear(rt, &colour);
++    ID2D1RenderTarget_DrawGeometry(rt, (ID2D1Geometry *)geometry, (ID2D1Brush *)brush, 2.0f, style);
++    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1StrokeStyle_Release(style);
++    ID2D1PathGeometry_Release(geometry);
++    read_coverage(&ctx, pixels, 16, 16);
++    polygons[2].points = sharp_miter_clipped;
++    polygons[2].count = 5;
++    check_coverage(pixels, 16, 16, 16, polygons, 3, COVERAGE_RULE_UNION, NULL, 0);
  
 -    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 2, NULL, sources, NULL, NULL);
-+    /* Transforms. */
++    /* Transforms apply to strokes as well as fills. */
 +    set_matrix_identity(&matrix);
 +    scale_matrix(&matrix, 2.0f, 3.0f);
 +    translate_matrix(&matrix, 0.125f, 0.5f);
 +    ID2D1RenderTarget_SetTransform(rt, &matrix);
 +    set_rect(&rect, 1.0f, 1.0f, 3.0f, 3.0f);
++    set_point(&p0, 1.0f, 0.5f);
++    set_point(&p1, 7.0f, 0.5f);
 +    ID2D1RenderTarget_BeginDraw(rt);
 +    ID2D1RenderTarget_Clear(rt, &colour);
 +    ID2D1RenderTarget_FillRectangle(rt, &rect, (ID2D1Brush *)brush);
++    ID2D1RenderTarget_DrawLine(rt, p0, p1, (ID2D1Brush *)brush, 0.5f, NULL);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    read_coverage(&ctx, pixels, 16, 16);
 +    set_rect(&rect, 2.25f, 4.5f, 6.25f, 10.5f);
 +    coverage_rect_polygon(polygon, &rect);
-+    polygons[0].points = polygon;
-+    polygons[0].count = 4;
-+    check_coverage(pixels, 16, 16, 16, polygons, 1, COVERAGE_RULE_NONZERO, NULL, 0);
++    set_rect(&rect, 2.25f, 2.25f, 14.25f, 3.75f);
++    coverage_rect_polygon(polygon2, &rect);
++    check_coverage(pixels, 16, 16, 16, polygons, 2, COVERAGE_RULE_UNION, NULL, 0);
  
 -    hr = ID2D1SpriteBatch_GetSprites(sprite_batch, 0, 2, dests, NULL, NULL, NULL);
 +    set_matrix_identity(&matrix);
@@ -6218,7 +6424,7 @@ index 94aa4586184..a6576581cab 100644
      release_test_context(&ctx);
  }
  
-@@ -18357,6 +21673,12 @@ START_TEST(d2d1)
+@@ -18357,6 +21879,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -6231,7 +6437,7 @@ index 94aa4586184..a6576581cab 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +21702,7 @@ START_TEST(d2d1)
+@@ -18380,6 +21908,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -6239,7 +6445,7 @@ index 94aa4586184..a6576581cab 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18399,6 +21722,7 @@ START_TEST(d2d1)
+@@ -18399,6 +21928,7 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_3d_transform);
      queue_d3d10_test(test_effect_color_management);
      queue_test(test_transform_graph);
@@ -6247,7 +6453,7 @@ index 94aa4586184..a6576581cab 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,10 +21732,25 @@ START_TEST(d2d1)
+@@ -18408,10 +21938,25 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
