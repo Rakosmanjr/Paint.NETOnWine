@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..fb60db25d52 100644
+index ba6cea78e06..89fc1f4b7c9 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
 @@ -125,6 +125,11 @@ struct d2d_ps_cb
@@ -154,16 +154,20 @@ index ba6cea78e06..fb60db25d52 100644
      struct d2d_effect_properties properties;
      struct d2d_effect_context *effect_context;
      struct d2d_transform_graph *graph;
-@@ -869,6 +940,8 @@ struct d2d_effect
+@@ -869,6 +940,12 @@ struct d2d_effect
  
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect);
 +struct d2d_effect *unsafe_impl_from_ID2D1Effect(ID2D1Effect *iface);
 +ID2D1Effect *d2d_transform_node_get_effect(ID2D1TransformNode *node);
++BOOL d2d_transform_node_map_output_rect(ID2D1TransformNode *node,
++        const D2D1_RECT_L *output_rect, D2D1_RECT_L *input_rect);
++BOOL d2d_transform_node_map_input_rect(ID2D1TransformNode *node,
++        const D2D1_RECT_L *input_rect, D2D1_RECT_L *output_rect);
  void d2d_effect_init_properties(struct d2d_effect *effect, struct d2d_effect_properties *properties);
  HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
          UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
-@@ -964,6 +1037,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
+@@ -964,6 +1041,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
  void d2d_command_list_push_layer(struct d2d_command_list *command_list, const struct d2d_device_context *context,
          const D2D1_LAYER_PARAMETERS1 *params);
  void d2d_command_list_pop_layer(struct d2d_command_list *command_list);
@@ -172,7 +176,7 @@ index ba6cea78e06..fb60db25d52 100644
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1119,4 +1194,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1119,4 +1198,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  

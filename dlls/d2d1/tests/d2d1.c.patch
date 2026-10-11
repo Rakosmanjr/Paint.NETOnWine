@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..25fef45d3ce 100644
+index 94aa4586184..0d72e11a7f2 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -876,7 +876,7 @@ index 94aa4586184..25fef45d3ce 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17410,1169 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17410,1193 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -1548,6 +1548,8 @@ index 94aa4586184..25fef45d3ce 100644
 +{
 +    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
 +    ID2D1TransformGraph *graph = effect_impl->transform_graph;
++    static const D2D1_RECT_L bounds = {2, 3, 8, 40};
++    ID2D1BoundsAdjustmentTransform *bounds_transform;
 +    ID2D1TransformNode *node, *node2;
 +    POINT offset = {10, 0};
 +    POINT zero = {0, 0};
@@ -1625,6 +1627,17 @@ index 94aa4586184..25fef45d3ce 100644
 +            ok(hr == HRESULT_FROM_WIN32(ERROR_NOT_FOUND), "Got unexpected hr %#lx.\n", hr);
 +            break;
 +
++        case 7:
++            /* A bounds adjustment transform replaces the bounds of its input
++             * and leaves the pixels inside them as they are. */
++            hr = ID2D1EffectContext_CreateBoundsAdjustmentTransform(effect_impl->effect_context,
++                    &bounds, &bounds_transform);
++            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++            hr = ID2D1TransformGraph_SetSingleTransformNode(graph, (ID2D1TransformNode *)bounds_transform);
++            ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++            ID2D1BoundsAdjustmentTransform_Release(bounds_transform);
++            break;
++
 +        case 6:
 +            /* Clear() removes the nodes. */
 +            hr = ID2D1TransformGraph_AddNode(graph, node);
@@ -1669,21 +1682,24 @@ index 94aa4586184..25fef45d3ce 100644
 +    static const struct
 +    {
 +        const char *result;
-+        BOOL todo;
++        D2D1_RECT_F bounds;
 +    }
 +    steps[] =
 +    {
-+        {"passthrough"},
-+        {"passthrough"},
-+        {"offset", TRUE},
-+        {"offset", TRUE},
-+        {"passthrough"},
-+        {"passthrough"},
++        {"passthrough", {0.0f, 0.0f, 16.0f, 16.0f}},
++        {"passthrough", {0.0f, 0.0f, 16.0f, 16.0f}},
++        {"offset",      {10.0f, 0.0f, 26.0f, 16.0f}},
++        {"offset",      {10.0f, 0.0f, 26.0f, 16.0f}},
++        {"passthrough", {0.0f, 0.0f, 16.0f, 16.0f}},
++        {"passthrough", {0.0f, 0.0f, 16.0f, 16.0f}},
++        {"passthrough", {2.0f, 3.0f, 8.0f, 40.0f}},
 +    };
 +    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
 +    struct d2d1_test_context ctx;
++    D2D1_RECT_F bounds;
 +    ID2D1Factory1 *factory;
 +    DWORD pixels[16 * 16];
++    ID2D1Image *output;
 +    ID2D1Bitmap1 *bitmap;
 +    ID2D1Effect *effect;
 +    const char *result;
@@ -1734,8 +1750,16 @@ index 94aa4586184..25fef45d3ce 100644
 +                (const BYTE *)&step, sizeof(step));
 +        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +        result = draw_passthrough_or_offset(&ctx, effect);
-+        todo_wine_if(steps[i].todo)
 +        ok(!strcmp(result, steps[i].result), "Got unexpected result %s.\n", result);
++
++        ID2D1Effect_GetOutput(effect, &output);
++        hr = ID2D1DeviceContext_GetImageLocalBounds(ctx.context, output, &bounds);
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++        ok(compare_rect(&bounds, steps[i].bounds.left, steps[i].bounds.top,
++                steps[i].bounds.right, steps[i].bounds.bottom, 0),
++                "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
++                bounds.left, bounds.top, bounds.right, bounds.bottom);
++        ID2D1Image_Release(output);
 +        winetest_pop_context();
 +    }
 +
@@ -2046,7 +2070,7 @@ index 94aa4586184..25fef45d3ce 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +20195,12 @@ START_TEST(d2d1)
+@@ -18357,6 +20219,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -2059,7 +2083,7 @@ index 94aa4586184..25fef45d3ce 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +20224,7 @@ START_TEST(d2d1)
+@@ -18380,6 +20248,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -2067,7 +2091,7 @@ index 94aa4586184..25fef45d3ce 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18399,6 +20244,7 @@ START_TEST(d2d1)
+@@ -18399,6 +20268,7 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_3d_transform);
      queue_d3d10_test(test_effect_color_management);
      queue_test(test_transform_graph);
@@ -2075,7 +2099,7 @@ index 94aa4586184..25fef45d3ce 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,6 +20254,16 @@ START_TEST(d2d1)
+@@ -18408,6 +20278,16 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
