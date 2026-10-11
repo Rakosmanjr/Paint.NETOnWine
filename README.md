@@ -1,6 +1,10 @@
+This project is complementary and slower to progress than [Paint.NETOnWine](https://github.com/paintdotnet/Paint.NET-on-Wine)
+
 # Running Paint.NET on Wine
 
-This is a temporary project for getting Paint.NET to work under Wine.
+This is a temporary project for getting Paint.NET to work (better) under Wine.
+
+Since the release on official Paint.Net On Wine, this project is more about making paint.net run better under wine and, one day maybe, not require wine specific code inside paint.net
 
 See the discussions on the Paint.NET forums [here](https://forums.getpaint.net/topic/134148-getting-the-latest-pdn-version-working-on-linux-wine-work-in-progress/).
 
