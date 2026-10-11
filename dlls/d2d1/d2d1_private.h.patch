@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..3040c33a69d 100644
+index ba6cea78e06..fb60db25d52 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
 @@ -125,6 +125,11 @@ struct d2d_ps_cb
@@ -172,7 +172,7 @@ index ba6cea78e06..3040c33a69d 100644
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1119,4 +1194,20 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1119,4 +1194,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  
@@ -190,6 +190,7 @@ index ba6cea78e06..3040c33a69d 100644
 +    D2D1_COLOR_SPACE space;
 +    D2D1_COLOR_CONTEXT_TYPE type;
 +    DXGI_COLOR_SPACE_TYPE dxgi_space;
++    D2D1_SIMPLE_COLOR_PROFILE simple_profile;
 +};
 +
  #endif /* __WINE_D2D1_PRIVATE_H */

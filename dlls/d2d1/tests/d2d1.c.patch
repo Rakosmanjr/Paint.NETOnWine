@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..b5bb2128a18 100644
+index 94aa4586184..237dbee5133 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -856,7 +856,7 @@ index 94aa4586184..b5bb2128a18 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17404,809 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17404,933 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -930,6 +930,130 @@ index 94aa4586184..b5bb2128a18 100644
 +static HRESULT STDMETHODCALLTYPE passthrough1_effect_impl_create(IUnknown **effect_impl)
 +{
 +    return passthrough_effect_impl_create(effect_impl, &passthrough1_effect_impl_vtbl);
++}
++
++static void test_color_context_types(BOOL d3d11)
++{
++    static const struct
++    {
++        DXGI_COLOR_SPACE_TYPE dxgi;
++        HRESULT hr;
++        D2D1_COLOR_SPACE space;
++    }
++    dxgi_tests[] =
++    {
++        {DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,    S_OK,         D2D1_COLOR_SPACE_SRGB},
++        {DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,    S_OK,         D2D1_COLOR_SPACE_SCRGB},
++        {DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, S_OK,         D2D1_COLOR_SPACE_CUSTOM},
++        {DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709,  E_INVALIDARG, 0},
++    };
++    D2D1_SIMPLE_COLOR_PROFILE profile, out;
++    ID2D1ColorContext1 *context1;
++    struct d2d1_test_context ctx;
++    ID2D1DeviceContext5 *dc5;
++    ID2D1ColorContext *cc;
++    unsigned int i;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    if (!ctx.context || FAILED(ID2D1DeviceContext_QueryInterface(ctx.context,
++            &IID_ID2D1DeviceContext5, (void **)&dc5)))
++    {
++        win_skip("ID2D1DeviceContext5 is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    /* A context for a named colour space is described by an ICC profile, not
++     * a simple one, so it has no simple profile to report. */
++    hr = ID2D1DeviceContext5_CreateColorContext(dc5, D2D1_COLOR_SPACE_SRGB, NULL, 0, &cc);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    hr = ID2D1ColorContext_QueryInterface(cc, &IID_ID2D1ColorContext1, (void **)&context1);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(ID2D1ColorContext1_GetColorContextType(context1) == D2D1_COLOR_CONTEXT_TYPE_ICC,
++            "Got unexpected type %u.\n", ID2D1ColorContext1_GetColorContextType(context1));
++    ok(ID2D1ColorContext1_GetDXGIColorSpace(context1) == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
++            "Got unexpected DXGI colour space %u.\n", ID2D1ColorContext1_GetDXGIColorSpace(context1));
++    ok(!!ID2D1ColorContext1_GetProfileSize(context1), "Got no profile.\n");
++    hr = ID2D1ColorContext1_GetSimpleColorProfile(context1, &out);
++    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
++    ID2D1ColorContext1_Release(context1);
++    ID2D1ColorContext_Release(cc);
++
++    hr = ID2D1DeviceContext5_CreateColorContext(dc5, D2D1_COLOR_SPACE_SCRGB, NULL, 0, &cc);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    hr = ID2D1ColorContext_QueryInterface(cc, &IID_ID2D1ColorContext1, (void **)&context1);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(ID2D1ColorContext1_GetColorContextType(context1) == D2D1_COLOR_CONTEXT_TYPE_ICC,
++            "Got unexpected type %u.\n", ID2D1ColorContext1_GetColorContextType(context1));
++    ok(ID2D1ColorContext1_GetDXGIColorSpace(context1) == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
++            "Got unexpected DXGI colour space %u.\n", ID2D1ColorContext1_GetDXGIColorSpace(context1));
++    hr = ID2D1ColorContext1_GetSimpleColorProfile(context1, &out);
++    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
++    ID2D1ColorContext1_Release(context1);
++    ID2D1ColorContext_Release(cc);
++
++    /* A context for a DXGI colour space carries no profile of its own. */
++    for (i = 0; i < ARRAY_SIZE(dxgi_tests); ++i)
++    {
++        winetest_push_context("DXGI colour space %u", dxgi_tests[i].dxgi);
++        context1 = NULL;
++        hr = ID2D1DeviceContext5_CreateColorContextFromDxgiColorSpace(dc5, dxgi_tests[i].dxgi, &context1);
++        ok(hr == dxgi_tests[i].hr, "Got unexpected hr %#lx.\n", hr);
++        if (SUCCEEDED(hr))
++        {
++            ok(ID2D1ColorContext1_GetColorContextType(context1) == D2D1_COLOR_CONTEXT_TYPE_DXGI,
++                    "Got unexpected type %u.\n", ID2D1ColorContext1_GetColorContextType(context1));
++            ok(ID2D1ColorContext1_GetDXGIColorSpace(context1) == dxgi_tests[i].dxgi,
++                    "Got unexpected DXGI colour space %u.\n", ID2D1ColorContext1_GetDXGIColorSpace(context1));
++            ok(ID2D1ColorContext1_GetColorSpace(context1) == dxgi_tests[i].space,
++                    "Got unexpected colour space %u.\n", ID2D1ColorContext1_GetColorSpace(context1));
++            ok(!ID2D1ColorContext1_GetProfileSize(context1), "Got unexpected profile size %u.\n",
++                    ID2D1ColorContext1_GetProfileSize(context1));
++            hr = ID2D1ColorContext1_GetSimpleColorProfile(context1, &out);
++            ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
++            ID2D1ColorContext1_Release(context1);
++        }
++        winetest_pop_context();
++    }
++
++    /* "Retrieves a set simple color profile": the one the context was made
++     * from. */
++    profile.redPrimary.x = 0.64f;
++    profile.redPrimary.y = 0.33f;
++    profile.greenPrimary.x = 0.30f;
++    profile.greenPrimary.y = 0.60f;
++    profile.bluePrimary.x = 0.15f;
++    profile.bluePrimary.y = 0.06f;
++    profile.whitePointXZ.x = 0.9505f;
++    profile.whitePointXZ.y = 1.0890f;
++    profile.gamma = D2D1_GAMMA1_G2084;
++    hr = ID2D1DeviceContext5_CreateColorContextFromSimpleColorProfile(dc5, &profile, &context1);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    if (FAILED(hr))
++    {
++        ID2D1DeviceContext5_Release(dc5);
++        release_test_context(&ctx);
++        return;
++    }
++    ok(ID2D1ColorContext1_GetColorContextType(context1) == D2D1_COLOR_CONTEXT_TYPE_SIMPLE,
++            "Got unexpected type %u.\n", ID2D1ColorContext1_GetColorContextType(context1));
++    ok(ID2D1ColorContext1_GetDXGIColorSpace(context1) == DXGI_COLOR_SPACE_CUSTOM,
++            "Got unexpected DXGI colour space %u.\n", ID2D1ColorContext1_GetDXGIColorSpace(context1));
++    ok(ID2D1ColorContext1_GetColorSpace(context1) == D2D1_COLOR_SPACE_CUSTOM,
++            "Got unexpected colour space %u.\n", ID2D1ColorContext1_GetColorSpace(context1));
++    ok(!ID2D1ColorContext1_GetProfileSize(context1), "Got unexpected profile size %u.\n",
++            ID2D1ColorContext1_GetProfileSize(context1));
++    memset(&out, 0xcc, sizeof(out));
++    hr = ID2D1ColorContext1_GetSimpleColorProfile(context1, &out);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(!memcmp(&out, &profile, sizeof(out)), "Got a different profile back.\n");
++    ID2D1ColorContext1_Release(context1);
++
++    ID2D1DeviceContext5_Release(dc5);
++    release_test_context(&ctx);
 +}
 +
 +static void test_command_list_clip_layer(BOOL d3d11)
@@ -1666,7 +1790,7 @@ index 94aa4586184..b5bb2128a18 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +19829,12 @@ START_TEST(d2d1)
+@@ -18357,6 +19953,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -1679,7 +1803,7 @@ index 94aa4586184..b5bb2128a18 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +19858,7 @@ START_TEST(d2d1)
+@@ -18380,6 +19982,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -1687,13 +1811,14 @@ index 94aa4586184..b5bb2128a18 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18408,6 +19887,15 @@ START_TEST(d2d1)
+@@ -18408,6 +20011,16 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
 +    queue_test(test_effect_input_bounds);
 +    queue_test(test_command_list_transform);
 +    queue_test(test_command_list_clip_layer);
++    queue_test(test_color_context_types);
 +    queue_test(test_command_list_target_state);
 +    queue_test(test_effect_passthrough_graph);
 +    queue_test(test_is_dxgi_format_supported);
