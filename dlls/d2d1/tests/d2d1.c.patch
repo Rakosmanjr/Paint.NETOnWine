@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..0d72e11a7f2 100644
+index 94aa4586184..b9c90c3e24e 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -876,7 +876,7 @@ index 94aa4586184..0d72e11a7f2 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17410,1193 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17410,1507 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -1159,6 +1159,320 @@ index 94aa4586184..0d72e11a7f2 100644
 +
 +    ID2D1SolidColorBrush_Release(brush);
 +    ID2D1CommandList_Release(command_list);
++    release_test_context(&ctx);
++}
++
++/* Checks the rects and offsets streamed back from a command list against the
++ * ones test_command_list_many_commands() recorded. */
++struct rect_sink
++{
++    ID2D1CommandSink ID2D1CommandSink_iface;
++    unsigned int bitmap_count, image_count, mismatches;
++};
++
++static struct rect_sink *impl_from_ID2D1CommandSink(ID2D1CommandSink *iface)
++{
++    return CONTAINING_RECORD(iface, struct rect_sink, ID2D1CommandSink_iface);
++}
++
++static void many_commands_rect(unsigned int i, D2D1_RECT_F *rect)
++{
++    set_rect(rect, (i % 8) * 4.0f, (i / 8) * 4.0f, (i % 8) * 4.0f + 4.0f, (i / 8) * 4.0f + 4.0f);
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_QueryInterface(ID2D1CommandSink *iface, REFIID iid, void **out)
++{
++    if (IsEqualGUID(iid, &IID_ID2D1CommandSink) || IsEqualGUID(iid, &IID_IUnknown))
++    {
++        *out = iface;
++        return S_OK;
++    }
++
++    *out = NULL;
++    return E_NOINTERFACE;
++}
++
++static ULONG STDMETHODCALLTYPE rect_sink_AddRef(ID2D1CommandSink *iface)
++{
++    return 2;
++}
++
++static ULONG STDMETHODCALLTYPE rect_sink_Release(ID2D1CommandSink *iface)
++{
++    return 1;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_BeginDraw(ID2D1CommandSink *iface)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_EndDraw(ID2D1CommandSink *iface)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetAntialiasMode(ID2D1CommandSink *iface, D2D1_ANTIALIAS_MODE mode)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetTags(ID2D1CommandSink *iface, D2D1_TAG tag1, D2D1_TAG tag2)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetTextAntialiasMode(ID2D1CommandSink *iface,
++        D2D1_TEXT_ANTIALIAS_MODE mode)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetTextRenderingParams(ID2D1CommandSink *iface,
++        IDWriteRenderingParams *params)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetTransform(ID2D1CommandSink *iface, const D2D1_MATRIX_3X2_F *transform)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetPrimitiveBlend(ID2D1CommandSink *iface, D2D1_PRIMITIVE_BLEND blend)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_SetUnitMode(ID2D1CommandSink *iface, D2D1_UNIT_MODE mode)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_Clear(ID2D1CommandSink *iface, const D2D1_COLOR_F *colour)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawGlyphRun(ID2D1CommandSink *iface, D2D1_POINT_2F origin,
++        const DWRITE_GLYPH_RUN *run, const DWRITE_GLYPH_RUN_DESCRIPTION *desc, ID2D1Brush *brush,
++        DWRITE_MEASURING_MODE mode)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawLine(ID2D1CommandSink *iface, D2D1_POINT_2F p0, D2D1_POINT_2F p1,
++        ID2D1Brush *brush, float width, ID2D1StrokeStyle *style)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawGeometry(ID2D1CommandSink *iface, ID2D1Geometry *geometry,
++        ID2D1Brush *brush, float width, ID2D1StrokeStyle *style)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawRectangle(ID2D1CommandSink *iface, const D2D1_RECT_F *rect,
++        ID2D1Brush *brush, float width, ID2D1StrokeStyle *style)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawBitmap(ID2D1CommandSink *iface, ID2D1Bitmap *bitmap,
++        const D2D1_RECT_F *dst_rect, float opacity, D2D1_INTERPOLATION_MODE mode,
++        const D2D1_RECT_F *src_rect, const D2D1_MATRIX_4X4_F *perspective_transform)
++{
++    struct rect_sink *sink = impl_from_ID2D1CommandSink(iface);
++    D2D1_RECT_F expected;
++
++    many_commands_rect(sink->bitmap_count++, &expected);
++    if (!dst_rect || !compare_rect(dst_rect, expected.left, expected.top, expected.right, expected.bottom, 0))
++        ++sink->mismatches;
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawImage(ID2D1CommandSink *iface, ID2D1Image *image,
++        const D2D1_POINT_2F *offset, const D2D1_RECT_F *image_rect, D2D1_INTERPOLATION_MODE mode,
++        D2D1_COMPOSITE_MODE composite_mode)
++{
++    struct rect_sink *sink = impl_from_ID2D1CommandSink(iface);
++    D2D1_RECT_F expected;
++
++    many_commands_rect(sink->image_count++, &expected);
++    if (!offset || offset->x != expected.left || offset->y != expected.top)
++        ++sink->mismatches;
++    if (!image_rect || !compare_rect(image_rect, 0.0f, 0.0f, 4.0f, 4.0f, 0))
++        ++sink->mismatches;
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_DrawGdiMetafile(ID2D1CommandSink *iface, ID2D1GdiMetafile *metafile,
++        const D2D1_POINT_2F *offset)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_FillMesh(ID2D1CommandSink *iface, ID2D1Mesh *mesh, ID2D1Brush *brush)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_FillOpacityMask(ID2D1CommandSink *iface, ID2D1Bitmap *bitmap,
++        ID2D1Brush *brush, const D2D1_RECT_F *dst_rect, const D2D1_RECT_F *src_rect)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_FillGeometry(ID2D1CommandSink *iface, ID2D1Geometry *geometry,
++        ID2D1Brush *brush, ID2D1Brush *opacity_brush)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_FillRectangle(ID2D1CommandSink *iface, const D2D1_RECT_F *rect,
++        ID2D1Brush *brush)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_PushAxisAlignedClip(ID2D1CommandSink *iface,
++        const D2D1_RECT_F *rect, D2D1_ANTIALIAS_MODE mode)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_PushLayer(ID2D1CommandSink *iface,
++        const D2D1_LAYER_PARAMETERS1 *params, ID2D1Layer *layer)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_PopAxisAlignedClip(ID2D1CommandSink *iface)
++{
++    return S_OK;
++}
++
++static HRESULT STDMETHODCALLTYPE rect_sink_PopLayer(ID2D1CommandSink *iface)
++{
++    return S_OK;
++}
++
++static const ID2D1CommandSinkVtbl rect_sink_vtbl =
++{
++    rect_sink_QueryInterface,
++    rect_sink_AddRef,
++    rect_sink_Release,
++    rect_sink_BeginDraw,
++    rect_sink_EndDraw,
++    rect_sink_SetAntialiasMode,
++    rect_sink_SetTags,
++    rect_sink_SetTextAntialiasMode,
++    rect_sink_SetTextRenderingParams,
++    rect_sink_SetTransform,
++    rect_sink_SetPrimitiveBlend,
++    rect_sink_SetUnitMode,
++    rect_sink_Clear,
++    rect_sink_DrawGlyphRun,
++    rect_sink_DrawLine,
++    rect_sink_DrawGeometry,
++    rect_sink_DrawRectangle,
++    rect_sink_DrawBitmap,
++    rect_sink_DrawImage,
++    rect_sink_DrawGdiMetafile,
++    rect_sink_FillMesh,
++    rect_sink_FillOpacityMask,
++    rect_sink_FillGeometry,
++    rect_sink_FillRectangle,
++    rect_sink_PushAxisAlignedClip,
++    rect_sink_PushLayer,
++    rect_sink_PopAxisAlignedClip,
++    rect_sink_PopLayer,
++};
++
++/* Enough commands that the list has to grow its storage several times while
++ * recording. The rects and offsets each command carries must survive that. */
++static void test_command_list_many_commands(BOOL d3d11)
++{
++    static const DWORD red[16] =
++    {
++        0xffff0000, 0xffff0000, 0xffff0000, 0xffff0000,
++        0xffff0000, 0xffff0000, 0xffff0000, 0xffff0000,
++        0xffff0000, 0xffff0000, 0xffff0000, 0xffff0000,
++        0xffff0000, 0xffff0000, 0xffff0000, 0xffff0000,
++    };
++    struct rect_sink sink = {{&rect_sink_vtbl}};
++    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
++    ID2D1CommandList *command_list;
++    struct d2d1_test_context ctx;
++    ID2D1DeviceContext *context;
++    D2D1_POINT_2F offset;
++    ID2D1Bitmap1 *bitmap;
++    ID2D1Image *target;
++    D2D1_SIZE_U size;
++    D2D1_RECT_F rect;
++    unsigned int i;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    context = ctx.context;
++    if (!ctx.factory1)
++    {
++        win_skip("Command lists are not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    set_size_u(&size, 4, 4);
++    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
++    bitmap_desc.dpiX = 96.0f;
++    bitmap_desc.dpiY = 96.0f;
++    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
++    bitmap_desc.colorContext = NULL;
++    hr = ID2D1DeviceContext_CreateBitmap(context, size, red, sizeof(*red) * 4, &bitmap_desc, &bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1DeviceContext_CreateCommandList(context, &command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    ID2D1DeviceContext_GetTarget(context, &target);
++    ID2D1DeviceContext_SetTarget(context, (ID2D1Image *)command_list);
++    ID2D1DeviceContext_BeginDraw(context);
++
++    for (i = 0; i < 64; ++i)
++    {
++        many_commands_rect(i, &rect);
++        ID2D1DeviceContext_DrawBitmap(context, (ID2D1Bitmap *)bitmap, &rect, 1.0f,
++                D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, NULL, NULL);
++    }
++    for (i = 0; i < 64; ++i)
++    {
++        many_commands_rect(i, &rect);
++        set_point(&offset, rect.left, rect.top);
++        set_rect(&rect, 0.0f, 0.0f, 4.0f, 4.0f);
++        ID2D1DeviceContext_DrawImage(context, (ID2D1Image *)bitmap, &offset, &rect,
++                D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR, D2D1_COMPOSITE_MODE_SOURCE_OVER);
++    }
++
++    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1DeviceContext_SetTarget(context, target);
++    if (target)
++        ID2D1Image_Release(target);
++    hr = ID2D1CommandList_Close(command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1CommandList_Stream(command_list, &sink.ID2D1CommandSink_iface);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(sink.bitmap_count == 64, "Got unexpected bitmap count %u.\n", sink.bitmap_count);
++    ok(sink.image_count == 64, "Got unexpected image count %u.\n", sink.image_count);
++    ok(!sink.mismatches, "%u rects or offsets differ from the ones recorded.\n", sink.mismatches);
++
++    ID2D1CommandList_Release(command_list);
++    ID2D1Bitmap1_Release(bitmap);
 +    release_test_context(&ctx);
 +}
 +
@@ -2070,7 +2384,7 @@ index 94aa4586184..0d72e11a7f2 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +20219,12 @@ START_TEST(d2d1)
+@@ -18357,6 +20533,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -2083,7 +2397,7 @@ index 94aa4586184..0d72e11a7f2 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +20248,7 @@ START_TEST(d2d1)
+@@ -18380,6 +20562,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -2091,7 +2405,7 @@ index 94aa4586184..0d72e11a7f2 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18399,6 +20268,7 @@ START_TEST(d2d1)
+@@ -18399,6 +20582,7 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_3d_transform);
      queue_d3d10_test(test_effect_color_management);
      queue_test(test_transform_graph);
@@ -2099,13 +2413,14 @@ index 94aa4586184..0d72e11a7f2 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,6 +20278,16 @@ START_TEST(d2d1)
+@@ -18408,6 +20592,17 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
 +    queue_test(test_effect_input_bounds);
 +    queue_test(test_command_list_transform);
 +    queue_test(test_command_list_clip_layer);
++    queue_test(test_command_list_many_commands);
 +    queue_test(test_color_context_types);
 +    queue_test(test_command_list_target_state);
 +    queue_test(test_effect_passthrough_graph);
