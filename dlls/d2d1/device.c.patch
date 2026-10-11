@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..8f335316be6 100644
+index 552d6d4c24c..4a4258a1eba 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -435,10 +435,19 @@ index 552d6d4c24c..8f335316be6 100644
          for (i = 0; i < D2D_SHAPE_TYPE_COUNT; ++i)
          {
              ID3D11VertexShader_Release(context->shape_resources[i].vs);
-@@ -1281,6 +1641,1057 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
+@@ -1281,153 +1641,1216 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawBitmap(ID2D1DeviceContext6
      }
  }
  
+-static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
+-        const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
+-        ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
+-{
+-    struct d2d_device_context *render_target = impl_from_ID2D1DeviceContext(iface);
+-    IDWriteTextLayout *text_layout;
+-    IDWriteFactory *dwrite_factory;
+-    D2D1_POINT_2F origin;
+-    float width, height;
 +/* Custom effect pixel shaders are compiled against a fixed D2D signature:
 + *
 + *     float4 main(float4 clip : SV_POSITION, float4 scene : SCENE_POSITION,
@@ -460,18 +469,36 @@ index 552d6d4c24c..8f335316be6 100644
 +    char source[8192], *p = source;
 +    ID3D10Blob *compiled, *errors;
 +    unsigned int i, element_count, coord_count;
-+    HRESULT hr;
-+
+     HRESULT hr;
+ 
+-    TRACE("iface %p, string %s, string_len %u, text_format %p, layout_rect %s, "
+-            "brush %p, options %#x, measuring_mode %#x.\n",
+-            iface, debugstr_wn(string, string_len), string_len, text_format, debug_d2d_rect_f(layout_rect),
+-            brush, options, measuring_mode);
 +    if (input_count > D2D_EFFECT_MAX_INPUTS)
 +        return E_INVALIDARG;
-+
+ 
+-    if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
+-            &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
 +    if (context->effect_vs[input_count])
-+    {
+     {
+-        ERR("Failed to create dwrite factory, hr %#lx.\n", hr);
+-        return;
 +        *vs = context->effect_vs[input_count];
 +        *il = context->effect_il[input_count];
 +        return S_OK;
-+    }
-+
+     }
+ 
+-    width = max(0.0f, layout_rect->right - layout_rect->left);
+-    height = max(0.0f, layout_rect->bottom - layout_rect->top);
+-    if (measuring_mode == DWRITE_MEASURING_MODE_NATURAL)
+-        hr = IDWriteFactory_CreateTextLayout(dwrite_factory, string, string_len, text_format,
+-                width, height, &text_layout);
+-    else
+-        hr = IDWriteFactory_CreateGdiCompatibleTextLayout(dwrite_factory, string, string_len, text_format,
+-                width, height, render_target->desc.dpiX / 96.0f, (DWRITE_MATRIX *)&render_target->drawing_state.transform,
+-                measuring_mode == DWRITE_MEASURING_MODE_GDI_NATURAL, &text_layout);
+-    IDWriteFactory_Release(dwrite_factory);
 +    /* Always emit at least TEXCOORD0. A generator declares it as its output
 +     * texel coordinate even though it samples nothing, and a pixel shader
 +     * whose declared input the vertex shader does not supply reads undefined
@@ -532,37 +559,63 @@ index 552d6d4c24c..8f335316be6 100644
 +            ID3D10Blob_GetBufferPointer(compiled), ID3D10Blob_GetBufferSize(compiled),
 +            &context->effect_il[input_count]);
 +    ID3D10Blob_Release(compiled);
-+    if (FAILED(hr))
-+    {
+     if (FAILED(hr))
+     {
+-        ERR("Failed to create text layout, hr %#lx.\n", hr);
+-        return;
 +        WARN("Failed to create the effect input layout, hr %#lx.\n", hr);
 +        ID3D11VertexShader_Release(context->effect_vs[input_count]);
 +        context->effect_vs[input_count] = NULL;
 +        return hr;
-+    }
-+
+     }
+ 
+-    d2d_point_set(&origin, min(layout_rect->left, layout_rect->right), min(layout_rect->top, layout_rect->bottom));
+-    ID2D1DeviceContext1_DrawTextLayout((ID2D1DeviceContext1 *)iface, origin, text_layout, brush, options);
+-    IDWriteTextLayout_Release(text_layout);
 +    *vs = context->effect_vs[input_count];
 +    *il = context->effect_il[input_count];
 +
 +    return S_OK;
-+}
-+
+ }
+ 
+-static void STDMETHODCALLTYPE d2d_device_context_DrawTextLayout(ID2D1DeviceContext6 *iface,
+-        D2D1_POINT_2F origin, IDWriteTextLayout *layout, ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options)
 +struct d2d_effect_vertex
-+{
+ {
+-    struct d2d_device_context *render_target = impl_from_ID2D1DeviceContext(iface);
+-    struct d2d_draw_text_layout_ctx ctx;
+-    HRESULT hr;
+-
+-    TRACE("iface %p, origin %s, layout %p, brush %p, options %#x.\n",
+-            iface, debug_d2d_point_2f(&origin), layout, brush, options);
+-
+-    ctx.brush = brush;
+-    ctx.options = options;
 +    struct d2d_vec4 position;
 +    struct d2d_vec4 scene;
 +    struct d2d_vec4 uv[D2D_EFFECT_MAX_INPUTS];
 +};
-+
+ 
+-    if (FAILED(hr = IDWriteTextLayout_Draw(layout,
+-            &ctx, &render_target->IDWriteTextRenderer_iface, origin.x, origin.y)))
+-        FIXME("Failed to draw text layout, hr %#lx.\n", hr);
 +static LONG d2d_rect_l_width(const D2D1_RECT_L *rect)
 +{
 +    return rect->right - rect->left;
-+}
-+
+ }
+ 
+-static D2D1_ANTIALIAS_MODE d2d_device_context_set_aa_mode_from_text_aa_mode(struct d2d_device_context *rt)
 +static LONG d2d_rect_l_height(const D2D1_RECT_L *rect)
-+{
+ {
+-    D2D1_ANTIALIAS_MODE prev_antialias_mode = rt->drawing_state.antialiasMode;
+-    rt->drawing_state.antialiasMode = rt->drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_ALIASED ?
+-            D2D1_ANTIALIAS_MODE_ALIASED : D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
+-    return prev_antialias_mode;
 +    return rect->bottom - rect->top;
-+}
-+
+ }
+ 
+-static HRESULT d2d_device_context_get_glyph_run_geometry(struct d2d_device_context *context,
+-        const DWRITE_GLYPH_RUN *glyph_run, ID2D1PathGeometry **result)
 +/* Build the quad for a node. The quad covers the node's output rect, which
 + * maps to the whole of the intermediate, so clip space runs -1..1. Each input
 + * gets its own texture coordinates, since inputs cover different rects in the
@@ -570,35 +623,62 @@ index 552d6d4c24c..8f335316be6 100644
 + * size. */
 +static void d2d_effect_fill_quad(struct d2d_effect_vertex *v, const D2D1_RECT_L *output_rect,
 +        const D2D1_RECT_L *input_rects, unsigned int input_count)
-+{
+ {
+-    ID2D1PathGeometry *geometry;
+-    ID2D1GeometrySink *sink;
+-    HRESULT hr;
 +    static const unsigned int order[6] = {0, 1, 2, 2, 1, 3};
 +    static const float cx[4] = {-1.0f, 1.0f, -1.0f, 1.0f};
 +    static const float cy[4] = { 1.0f, 1.0f, -1.0f, -1.0f};
 +    unsigned int i, j, c;
 +    float x, y;
-+
+ 
+-    *result = NULL;
 +    for (i = 0; i < 6; ++i)
 +    {
 +        c = order[i];
-+
+ 
+-    if (FAILED(hr = ID2D1Factory_CreatePathGeometry(context->factory, &geometry)))
+-        return hr;
 +        /* Position of this corner in the effect's coordinate space. */
 +        x = (c & 1) ? output_rect->right : output_rect->left;
 +        y = (c & 2) ? output_rect->bottom : output_rect->top;
-+
+ 
+-    if (FAILED(hr = ID2D1PathGeometry_Open(geometry, &sink)))
+-    {
+-        ID2D1PathGeometry_Release(geometry);
+-        return hr;
+-    }
 +        v[i].position.x = cx[c];
 +        v[i].position.y = cy[c];
 +        v[i].position.z = 0.0f;
 +        v[i].position.w = 1.0f;
-+
+ 
+-    if (FAILED(hr = IDWriteFontFace_GetGlyphRunOutline(glyph_run->fontFace, glyph_run->fontEmSize,
+-            glyph_run->glyphIndices, glyph_run->glyphAdvances, glyph_run->glyphOffsets, glyph_run->glyphCount,
+-            glyph_run->isSideways, glyph_run->bidiLevel & 1, (IDWriteGeometrySink *)sink)))
+-    {
+-        ERR("Failed to get glyph run outline, hr %#lx.\n", hr);
+-        ID2D1GeometrySink_Release(sink);
+-        ID2D1PathGeometry_Release(geometry);
+-        return hr;
+-    }
 +        v[i].scene.x = x;
 +        v[i].scene.y = y;
 +        v[i].scene.z = 0.0f;
 +        v[i].scene.w = 1.0f;
-+
+ 
+-    if (FAILED(hr = ID2D1GeometrySink_Close(sink)))
+-        ERR("Failed to close geometry sink, hr %#lx.\n", hr);
+-    ID2D1GeometrySink_Release(sink);
 +        for (j = 0; j < D2D_EFFECT_MAX_INPUTS; ++j)
 +        {
 +            LONG w, h;
-+
+ 
+-    if (hr == S_OK)
+-        *result = geometry;
+-    else
+-        ID2D1PathGeometry_Release(geometry);
 +            if (!input_count && !j)
 +            {
 +                /* A generator has no input to sample, but still declares
@@ -611,7 +691,8 @@ index 552d6d4c24c..8f335316be6 100644
 +                v[i].uv[0].w = 1.0f;
 +                continue;
 +            }
-+
+ 
+-    return hr;
 +            if (j >= input_count)
 +            {
 +                memset(&v[i].uv[j], 0, sizeof(v[i].uv[j]));
@@ -627,8 +708,10 @@ index 552d6d4c24c..8f335316be6 100644
 +            v[i].uv[j].w = 1.0f;
 +        }
 +    }
-+}
-+
+ }
+ 
+-static void d2d_device_context_draw_glyph_run_outline(struct d2d_device_context *context,
+-        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush)
 +/* Effect shaders sample their inputs through InputSampler0..N. Without a
 + * sampler bound those slots are NULL and every sample reads back garbage, so
 + * bind a linear clamping sampler for each input. Clamping also stands in for
@@ -640,12 +723,18 @@ index 552d6d4c24c..8f335316be6 100644
 + * transforms clamps instead, since extending the edge is what those ask
 + * for. */
 +static ID3D11SamplerState *d2d_effect_get_sampler(struct d2d_device_context *context, BOOL clamp)
-+{
+ {
+-    D2D1_MATRIX_3X2_F *transform, prev_transform;
+-    D2D1_ANTIALIAS_MODE prev_antialias_mode;
+-    ID2D1PathGeometry *geometry;
 +    ID3D11SamplerState **sampler_state;
-+    HRESULT hr;
-+
+     HRESULT hr;
+ 
+-    if (FAILED(hr = d2d_device_context_get_glyph_run_geometry(context, glyph_run, &geometry)))
 +    if (!clamp)
-+    {
+     {
+-        ERR("Failed to create geometry, hr %#lx.\n", hr);
+-        return;
 +        if (!context->effect_sampler_state)
 +        {
 +            D3D11_SAMPLER_DESC sampler_desc;
@@ -673,13 +762,23 @@ index 552d6d4c24c..8f335316be6 100644
 +        }
 +
 +        return context->effect_sampler_state;
-+    }
-+
+     }
+ 
+-    transform = &context->drawing_state.transform;
+-    prev_transform = *transform;
+-    transform->_31 += baseline_origin.x * transform->_11 + baseline_origin.y * transform->_21;
+-    transform->_32 += baseline_origin.x * transform->_12 + baseline_origin.y * transform->_22;
+-    prev_antialias_mode = d2d_device_context_set_aa_mode_from_text_aa_mode(context);
+-    d2d_device_context_fill_geometry(context, unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)geometry),
+-            unsafe_impl_from_ID2D1Brush(brush), NULL);
+-    context->drawing_state.antialiasMode = prev_antialias_mode;
+-    *transform = prev_transform;
 +    sampler_state = &context->sampler_states
 +            [D2D1_INTERPOLATION_MODE_LINEAR % D2D_SAMPLER_INTERPOLATION_MODE_COUNT]
 +            [D2D1_EXTEND_MODE_CLAMP % D2D_SAMPLER_EXTEND_MODE_COUNT]
 +            [D2D1_EXTEND_MODE_CLAMP % D2D_SAMPLER_EXTEND_MODE_COUNT];
-+
+ 
+-    ID2D1PathGeometry_Release(geometry);
 +    if (!*sampler_state)
 +    {
 +        D3D11_SAMPLER_DESC sampler_desc;
@@ -707,11 +806,20 @@ index 552d6d4c24c..8f335316be6 100644
 +    }
 +
 +    return *sampler_state;
-+}
-+
+ }
+ 
+-static HRESULT d2d_device_context_get_glyph_run_analysis(struct d2d_device_context *context,
+-        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run,
+-        DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEASURING_MODE measuring_mode,
+-        DWRITE_TEXT_ANTIALIAS_MODE antialias_mode, DWRITE_TEXTURE_TYPE *texture_type,
+-        IDWriteGlyphRunAnalysis **result)
 +static HRESULT d2d_effect_create_intermediate(struct d2d_device_context *context,
 +        const D2D1_SIZE_U *size, struct d2d_bitmap **bitmap)
-+{
+ {
+-    IDWriteGlyphRunAnalysis *analysis;
+-    IDWriteFactory2 *dwrite_factory;
+-    D2D1_MATRIX_3X2_F *transform;
+-    float scale_x, scale_y;
 +    D2D1_BITMAP_PROPERTIES1 desc;
 +
 +    memset(&desc, 0, sizeof(desc));
@@ -1330,6 +1438,28 @@ index 552d6d4c24c..8f335316be6 100644
 +
 +/* Evaluate an effect's transform graph, returning the rendered result and the
 + * rect it covers in the effect's coordinate space. */
++/* An effect refreshes its render info -- in particular its pixel shader
++ * constants -- and may rebuild its transform graph from PrepareForRender(),
++ * so nothing may be decided from the graph before it has run. D2D calls it
++ * when the effect is first drawn or measured, and again after a property
++ * change, not every time. */
++static HRESULT d2d_effect_prepare(struct d2d_effect *effect)
++{
++    HRESULT hr;
++
++    if (!effect->effect_impl || effect->pending_change == D2D1_CHANGE_TYPE_NONE)
++        return S_OK;
++
++    if (FAILED(hr = ID2D1EffectImpl_PrepareForRender(effect->effect_impl, effect->pending_change)))
++    {
++        WARN("PrepareForRender() failed, hr %#lx.\n", hr);
++        return hr;
++    }
++    effect->pending_change = D2D1_CHANGE_TYPE_NONE;
++
++    return S_OK;
++}
++
 +static HRESULT d2d_effect_run_graph(struct d2d_device_context *context, struct d2d_effect *effect,
 +        const D2D1_RECT_L *requested, unsigned int depth, struct d2d_bitmap **out,
 +        D2D1_RECT_L *out_rect)
@@ -1354,18 +1484,8 @@ index 552d6d4c24c..8f335316be6 100644
 +        return E_FAIL;
 +    }
 +
-+    /* An effect refreshes its render info -- in particular its pixel shader
-+     * constants -- from PrepareForRender(). Properties can change between
-+     * draws, so this has to run for every render and not just once when the
-+     * effect is created, or the shaders execute against stale constants.
-+     * It can also rebuild the transform graph, so nothing may be decided
-+     * from the graph before it has run. */
-+    if (effect->effect_impl && FAILED(hr = ID2D1EffectImpl_PrepareForRender(effect->effect_impl,
-+            D2D1_CHANGE_TYPE_PROPERTIES)))
-+    {
-+        WARN("PrepareForRender() failed, hr %#lx.\n", hr);
++    if (FAILED(hr = d2d_effect_prepare(effect)))
 +        return hr;
-+    }
 +
 +    /* A passthrough graph's output is one of the effect's inputs, unchanged,
 +     * whatever nodes the graph holds. */
@@ -1490,19 +1610,166 @@ index 552d6d4c24c..8f335316be6 100644
 +
 +}
 +
- static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
-         const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
-         ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
-@@ -1834,39 +3245,63 @@ static void STDMETHODCALLTYPE d2d_device_context_PushLayer(ID2D1DeviceContext6 *
++static void STDMETHODCALLTYPE d2d_device_context_DrawText(ID2D1DeviceContext6 *iface,
++        const WCHAR *string, UINT32 string_len, IDWriteTextFormat *text_format, const D2D1_RECT_F *layout_rect,
++        ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options, DWRITE_MEASURING_MODE measuring_mode)
++{
++    struct d2d_device_context *render_target = impl_from_ID2D1DeviceContext(iface);
++    IDWriteTextLayout *text_layout;
++    IDWriteFactory *dwrite_factory;
++    D2D1_POINT_2F origin;
++    float width, height;
++    HRESULT hr;
++
++    TRACE("iface %p, string %s, string_len %u, text_format %p, layout_rect %s, "
++            "brush %p, options %#x, measuring_mode %#x.\n",
++            iface, debugstr_wn(string, string_len), string_len, text_format, debug_d2d_rect_f(layout_rect),
++            brush, options, measuring_mode);
++
++    if (FAILED(hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
++            &IID_IDWriteFactory, (IUnknown **)&dwrite_factory)))
++    {
++        ERR("Failed to create dwrite factory, hr %#lx.\n", hr);
++        return;
++    }
++
++    width = max(0.0f, layout_rect->right - layout_rect->left);
++    height = max(0.0f, layout_rect->bottom - layout_rect->top);
++    if (measuring_mode == DWRITE_MEASURING_MODE_NATURAL)
++        hr = IDWriteFactory_CreateTextLayout(dwrite_factory, string, string_len, text_format,
++                width, height, &text_layout);
++    else
++        hr = IDWriteFactory_CreateGdiCompatibleTextLayout(dwrite_factory, string, string_len, text_format,
++                width, height, render_target->desc.dpiX / 96.0f, (DWRITE_MATRIX *)&render_target->drawing_state.transform,
++                measuring_mode == DWRITE_MEASURING_MODE_GDI_NATURAL, &text_layout);
++    IDWriteFactory_Release(dwrite_factory);
++    if (FAILED(hr))
++    {
++        ERR("Failed to create text layout, hr %#lx.\n", hr);
++        return;
++    }
++
++    d2d_point_set(&origin, min(layout_rect->left, layout_rect->right), min(layout_rect->top, layout_rect->bottom));
++    ID2D1DeviceContext1_DrawTextLayout((ID2D1DeviceContext1 *)iface, origin, text_layout, brush, options);
++    IDWriteTextLayout_Release(text_layout);
++}
++
++static void STDMETHODCALLTYPE d2d_device_context_DrawTextLayout(ID2D1DeviceContext6 *iface,
++        D2D1_POINT_2F origin, IDWriteTextLayout *layout, ID2D1Brush *brush, D2D1_DRAW_TEXT_OPTIONS options)
++{
++    struct d2d_device_context *render_target = impl_from_ID2D1DeviceContext(iface);
++    struct d2d_draw_text_layout_ctx ctx;
++    HRESULT hr;
++
++    TRACE("iface %p, origin %s, layout %p, brush %p, options %#x.\n",
++            iface, debug_d2d_point_2f(&origin), layout, brush, options);
++
++    ctx.brush = brush;
++    ctx.options = options;
++
++    if (FAILED(hr = IDWriteTextLayout_Draw(layout,
++            &ctx, &render_target->IDWriteTextRenderer_iface, origin.x, origin.y)))
++        FIXME("Failed to draw text layout, hr %#lx.\n", hr);
++}
++
++static D2D1_ANTIALIAS_MODE d2d_device_context_set_aa_mode_from_text_aa_mode(struct d2d_device_context *rt)
++{
++    D2D1_ANTIALIAS_MODE prev_antialias_mode = rt->drawing_state.antialiasMode;
++    rt->drawing_state.antialiasMode = rt->drawing_state.textAntialiasMode == D2D1_TEXT_ANTIALIAS_MODE_ALIASED ?
++            D2D1_ANTIALIAS_MODE_ALIASED : D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
++    return prev_antialias_mode;
++}
++
++static HRESULT d2d_device_context_get_glyph_run_geometry(struct d2d_device_context *context,
++        const DWRITE_GLYPH_RUN *glyph_run, ID2D1PathGeometry **result)
++{
++    ID2D1PathGeometry *geometry;
++    ID2D1GeometrySink *sink;
++    HRESULT hr;
++
++    *result = NULL;
++
++    if (FAILED(hr = ID2D1Factory_CreatePathGeometry(context->factory, &geometry)))
++        return hr;
++
++    if (FAILED(hr = ID2D1PathGeometry_Open(geometry, &sink)))
++    {
++        ID2D1PathGeometry_Release(geometry);
++        return hr;
++    }
++
++    if (FAILED(hr = IDWriteFontFace_GetGlyphRunOutline(glyph_run->fontFace, glyph_run->fontEmSize,
++            glyph_run->glyphIndices, glyph_run->glyphAdvances, glyph_run->glyphOffsets, glyph_run->glyphCount,
++            glyph_run->isSideways, glyph_run->bidiLevel & 1, (IDWriteGeometrySink *)sink)))
++    {
++        ERR("Failed to get glyph run outline, hr %#lx.\n", hr);
++        ID2D1GeometrySink_Release(sink);
++        ID2D1PathGeometry_Release(geometry);
++        return hr;
++    }
++
++    if (FAILED(hr = ID2D1GeometrySink_Close(sink)))
++        ERR("Failed to close geometry sink, hr %#lx.\n", hr);
++    ID2D1GeometrySink_Release(sink);
++
++    if (hr == S_OK)
++        *result = geometry;
++    else
++        ID2D1PathGeometry_Release(geometry);
++
++    return hr;
++}
++
++static void d2d_device_context_draw_glyph_run_outline(struct d2d_device_context *context,
++        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run, ID2D1Brush *brush)
++{
++    D2D1_MATRIX_3X2_F *transform, prev_transform;
++    D2D1_ANTIALIAS_MODE prev_antialias_mode;
++    ID2D1PathGeometry *geometry;
++    HRESULT hr;
++
++    if (FAILED(hr = d2d_device_context_get_glyph_run_geometry(context, glyph_run, &geometry)))
++    {
++        ERR("Failed to create geometry, hr %#lx.\n", hr);
++        return;
++    }
++
++    transform = &context->drawing_state.transform;
++    prev_transform = *transform;
++    transform->_31 += baseline_origin.x * transform->_11 + baseline_origin.y * transform->_21;
++    transform->_32 += baseline_origin.x * transform->_12 + baseline_origin.y * transform->_22;
++    prev_antialias_mode = d2d_device_context_set_aa_mode_from_text_aa_mode(context);
++    d2d_device_context_fill_geometry(context, unsafe_impl_from_ID2D1Geometry((ID2D1Geometry *)geometry),
++            unsafe_impl_from_ID2D1Brush(brush), NULL);
++    context->drawing_state.antialiasMode = prev_antialias_mode;
++    *transform = prev_transform;
++
++    ID2D1PathGeometry_Release(geometry);
++}
++
++static HRESULT d2d_device_context_get_glyph_run_analysis(struct d2d_device_context *context,
++        D2D1_POINT_2F baseline_origin, const DWRITE_GLYPH_RUN *glyph_run,
++        DWRITE_RENDERING_MODE rendering_mode, DWRITE_MEASURING_MODE measuring_mode,
++        DWRITE_TEXT_ANTIALIAS_MODE antialias_mode, DWRITE_TEXTURE_TYPE *texture_type,
++        IDWriteGlyphRunAnalysis **result)
++{
++    IDWriteGlyphRunAnalysis *analysis;
++    IDWriteFactory2 *dwrite_factory;
++    D2D1_MATRIX_3X2_F *transform;
++    float scale_x, scale_y;
+     DWRITE_MATRIX m;
+     HRESULT hr;
+ 
+@@ -1834,39 +3257,63 @@ static void STDMETHODCALLTYPE d2d_device_context_PushLayer(ID2D1DeviceContext6 *
          const D2D1_LAYER_PARAMETERS *layer_parameters, ID2D1Layer *layer)
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
 +    D2D1_LAYER_PARAMETERS1 parameters;
 +    HRESULT hr;
++
++    TRACE("iface %p, layer_parameters %p, layer %p.\n", iface, layer_parameters, layer);
  
 -    FIXME("iface %p, layer_parameters %p, layer %p stub!\n", iface, layer_parameters, layer);
-+    TRACE("iface %p, layer_parameters %p, layer %p.\n", iface, layer_parameters, layer);
-+
 +    memcpy(&parameters, layer_parameters, sizeof(*layer_parameters));
 +    parameters.layerOptions = D2D1_LAYER_OPTIONS1_NONE;
  
@@ -1565,7 +1832,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static void STDMETHODCALLTYPE d2d_device_context_SaveDrawingState(ID2D1DeviceContext6 *iface,
-@@ -2059,6 +3494,9 @@ static void STDMETHODCALLTYPE d2d_device_context_BeginDraw(ID2D1DeviceContext6 *
+@@ -2059,6 +3506,9 @@ static void STDMETHODCALLTYPE d2d_device_context_BeginDraw(ID2D1DeviceContext6 *
      if (context->target.type == D2D_TARGET_COMMAND_LIST)
          d2d_command_list_begin_draw(context->target.command_list, context);
  
@@ -1575,17 +1842,18 @@ index 552d6d4c24c..8f335316be6 100644
      memset(&context->error, 0, sizeof(context->error));
  }
  
-@@ -2070,10 +3508,27 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_EndDraw(ID2D1DeviceContext6
+@@ -2068,12 +3518,29 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_EndDraw(ID2D1DeviceContext6
+     struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
+     HRESULT hr;
  
-     TRACE("iface %p, tag1 %p, tag2 %p.\n", iface, tag1, tag2);
- 
+-    TRACE("iface %p, tag1 %p, tag2 %p.\n", iface, tag1, tag2);
++    TRACE("iface %p, tag1 %p, tag2 %p.\n", iface, tag1, tag2);
++
 +    /* Recording into a command list. There is nothing to present, and the
 +     * list stays open until it is closed, so only the error state is
 +     * reported. */
-     if (context->target.type == D2D_TARGET_COMMAND_LIST)
-     {
--        FIXME("Unimplemented for command list target.\n");
--        return E_NOTIMPL;
++    if (context->target.type == D2D_TARGET_COMMAND_LIST)
++    {
 +        if (tag1)
 +            *tag1 = context->error.tag1;
 +        if (tag2)
@@ -1593,19 +1861,22 @@ index 552d6d4c24c..8f335316be6 100644
 +
 +        return context->error.code;
 +    }
-+
+ 
+-    if (context->target.type == D2D_TARGET_COMMAND_LIST)
 +    /* "You must call the PopLayer method before you call the EndDraw
 +     * method." Put the target back the way it was so that the next draw is
 +     * not left rendering into a layer nobody can pop. */
 +    if (context->layer_stack.count)
-+    {
+     {
+-        FIXME("Unimplemented for command list target.\n");
+-        return E_NOTIMPL;
 +        d2d_device_context_set_error(context, D2DERR_WRONG_STATE);
 +        while (context->layer_stack.count)
 +            d2d_device_context_pop_layer(context);
      }
  
      if (tag1)
-@@ -2161,9 +3616,34 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
+@@ -2161,9 +3628,34 @@ static UINT32 STDMETHODCALLTYPE d2d_device_context_GetMaximumBitmapSize(ID2D1Dev
  static BOOL STDMETHODCALLTYPE d2d_device_context_IsSupported(ID2D1DeviceContext6 *iface,
          const D2D1_RENDER_TARGET_PROPERTIES *desc)
  {
@@ -1642,7 +1913,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBitmap(ID2D1DeviceContext6 *iface,
-@@ -2199,13 +3679,339 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
+@@ -2199,13 +3691,339 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateBit
      return hr;
  }
  
@@ -1984,7 +2255,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilename(ID2D1DeviceContext6 *iface,
-@@ -2219,8 +4025,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
+@@ -2219,8 +4037,45 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromFilena
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromWicColorContext(ID2D1DeviceContext6 *iface,
          IWICColorContext *wic_color_context, ID2D1ColorContext **color_context)
  {
@@ -2011,7 +2282,7 @@ index 552d6d4c24c..8f335316be6 100644
 +
 +        if (FAILED(hr = IWICColorContext_GetProfileBytes(wic_color_context, size, pbBuffer, &size)))
 +            return hr;
- 
++
 +        return d2d_device_context_CreateColorContext(iface, D2D1_COLOR_SPACE_CUSTOM, pbBuffer, size, color_context);
 +    }
 +    else if (type == WICColorContextExifColorSpace)
@@ -2026,12 +2297,12 @@ index 552d6d4c24c..8f335316be6 100644
 +        FIXME("Unknown exif color type %u", exif_color);
 +        return E_NOTIMPL;
 +    }
-+
+ 
 +    FIXME("Unknown color context %u", type);
      return E_NOTIMPL;
  }
  
-@@ -2330,7 +4173,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
+@@ -2330,7 +4185,7 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_CreateGra
              iface, stops, stop_count, preinterpolation_space, postinterpolation_space,
              buffer_precision, extend_mode, color_interpolation_mode, gradient);
  
@@ -2040,7 +2311,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateImageBrush(ID2D1DeviceContext6 *iface,
-@@ -2385,9 +4228,9 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateCommandList(ID2D1Devic
+@@ -2385,9 +4240,9 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateCommandList(ID2D1Devic
  
  static BOOL STDMETHODCALLTYPE d2d_device_context_IsDxgiFormatSupported(ID2D1DeviceContext6 *iface, DXGI_FORMAT format)
  {
@@ -2052,7 +2323,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D1DeviceContext6 *iface,
-@@ -2420,6 +4263,78 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
+@@ -2420,6 +4275,78 @@ static BOOL STDMETHODCALLTYPE d2d_device_context_IsBufferPrecisionSupported(ID2D
      return !!(support & D3D11_FORMAT_SUPPORT_BUFFER);
  }
  
@@ -2131,7 +2402,7 @@ index 552d6d4c24c..8f335316be6 100644
  static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1DeviceContext6 *iface,
          ID2D1Image *image, D2D1_RECT_F *local_bounds)
  {
-@@ -2427,6 +4342,8 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2427,6 +4354,8 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
      D2D_SIZE_U pixel_size;
      ID2D1Bitmap *bitmap;
      D2D_SIZE_F size;
@@ -2140,7 +2411,7 @@ index 552d6d4c24c..8f335316be6 100644
  
      TRACE("iface %p, image %p, local_bounds %p.\n", iface, image, local_bounds);
  
-@@ -2456,7 +4373,70 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
+@@ -2456,7 +4385,76 @@ static HRESULT STDMETHODCALLTYPE d2d_device_context_GetImageLocalBounds(ID2D1Dev
  
          return S_OK;
      }
@@ -2149,6 +2420,12 @@ index 552d6d4c24c..8f335316be6 100644
 +    {
 +        struct d2d_effect *effect_impl = unsafe_impl_from_ID2D1Effect(effect);
 +        D2D1_RECT_L rect;
++
++        if (effect_impl && FAILED(hr = d2d_effect_prepare(effect_impl)))
++        {
++            ID2D1Effect_Release(effect);
++            return hr;
++        }
 +
 +        hr = E_NOTIMPL;
 +        if (effect_impl && effect_impl->graph && effect_impl->graph->passthrough)
@@ -2212,7 +2489,7 @@ index 552d6d4c24c..8f335316be6 100644
      {
          FIXME("Unable to get local bounds of image %p.\n", image);
  
-@@ -2616,6 +4596,12 @@ static void STDMETHODCALLTYPE d2d_device_context_SetTarget(ID2D1DeviceContext6 *
+@@ -2616,6 +4614,12 @@ static void STDMETHODCALLTYPE d2d_device_context_SetTarget(ID2D1DeviceContext6 *
          context->target.command_list = command_list_impl;
          context->target.object = target;
          context->target.type = D2D_TARGET_COMMAND_LIST;
@@ -2225,7 +2502,7 @@ index 552d6d4c24c..8f335316be6 100644
      }
      else
      {
-@@ -2637,13 +4623,23 @@ static void STDMETHODCALLTYPE d2d_device_context_GetTarget(ID2D1DeviceContext6 *
+@@ -2637,13 +4641,23 @@ static void STDMETHODCALLTYPE d2d_device_context_GetTarget(ID2D1DeviceContext6 *
  static void STDMETHODCALLTYPE d2d_device_context_SetRenderingControls(ID2D1DeviceContext6 *iface,
          const D2D1_RENDERING_CONTROLS *rendering_controls)
  {
@@ -2251,7 +2528,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static void STDMETHODCALLTYPE d2d_device_context_SetPrimitiveBlend(ID2D1DeviceContext6 *iface,
-@@ -2718,7 +4714,10 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2718,7 +4732,10 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          D2D1_COMPOSITE_MODE composite_mode)
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
@@ -2262,7 +2539,7 @@ index 552d6d4c24c..8f335316be6 100644
  
      TRACE("iface %p, image %p, target_offset %s, image_rect %s, interpolation_mode %#x, composite_mode %#x.\n",
              iface, image, debug_d2d_point_2f(target_offset), debug_d2d_rect_f(image_rect),
-@@ -2740,17 +4739,38 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
+@@ -2740,17 +4757,38 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawImage(ID2D1DeviceContext6 *
          return;
      }
  
@@ -2303,7 +2580,7 @@ index 552d6d4c24c..8f335316be6 100644
      FIXME("Unhandled image %p.\n", image);
  }
  
-@@ -2797,11 +4817,18 @@ static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_PushLayer(ID
+@@ -2797,11 +4835,18 @@ static void STDMETHODCALLTYPE d2d_device_context_ID2D1DeviceContext_PushLayer(ID
          const D2D1_LAYER_PARAMETERS1 *layer_parameters, ID2D1Layer *layer)
  {
      struct d2d_device_context *context = impl_from_ID2D1DeviceContext(iface);
@@ -2323,7 +2600,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_device_context_InvalidateEffectInputRectangle(ID2D1DeviceContext6 *iface,
-@@ -3177,17 +5204,65 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSvgDocument(ID2D1DeviceCont
+@@ -3177,17 +5222,65 @@ static void STDMETHODCALLTYPE d2d_device_context_DrawSvgDocument(ID2D1DeviceCont
  static HRESULT STDMETHODCALLTYPE d2d_device_context_CreateColorContextFromDxgiColorSpace(
          ID2D1DeviceContext6 *iface, DXGI_COLOR_SPACE_TYPE color_space, ID2D1ColorContext1 **color_context)
  {
@@ -2393,7 +2670,7 @@ index 552d6d4c24c..8f335316be6 100644
  }
  
  static void STDMETHODCALLTYPE d2d_device_context_BlendImage(ID2D1DeviceContext6 *iface, ID2D1Image *image,
-@@ -4253,7 +6328,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4253,7 +6346,7 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          { 1.0f, -1.0f},
      };
      static const UINT16 indices[] = {0, 1, 2, 2, 1, 3};
@@ -2402,7 +2679,7 @@ index 552d6d4c24c..8f335316be6 100644
  
      render_target->ID2D1DeviceContext6_iface.lpVtbl = &d2d_device_context_vtbl;
      render_target->ID2D1GdiInteropRenderTarget_iface.lpVtbl = &d2d_gdi_interop_render_target_vtbl;
-@@ -4278,6 +6353,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4278,6 +6371,14 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
          goto err;
      }
  
@@ -2417,7 +2694,7 @@ index 552d6d4c24c..8f335316be6 100644
      if (FAILED(hr = ID3D11Device1_CreateDeviceContextState(render_target->d3d_device,
              0, &feature_levels, 1, D3D11_SDK_VERSION, &IID_ID3D11Device1, NULL,
              &render_target->d3d_state)))
-@@ -4407,6 +6490,11 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
+@@ -4407,6 +6508,11 @@ static HRESULT d2d_device_context_init(struct d2d_device_context *render_target,
  
      render_target->drawing_state.transform = identity;
  
