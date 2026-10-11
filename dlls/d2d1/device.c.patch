@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/device.c b/dlls/d2d1/device.c
-index 552d6d4c24c..505173de92c 100644
+index 552d6d4c24c..32acb8f730c 100644
 --- a/dlls/d2d1/device.c
 +++ b/dlls/d2d1/device.c
 @@ -18,6 +18,7 @@
@@ -1362,8 +1362,8 @@ index 552d6d4c24c..505173de92c 100644
 +        return hr;
 +    }
 +
-+    /* A passthrough graph has no nodes at all: the effect's output is one of
-+     * its inputs, unchanged. */
++    /* A passthrough graph's output is one of the effect's inputs, unchanged,
++     * whatever nodes the graph holds. */
 +    if (effect->graph->passthrough)
 +        return d2d_effect_resolve_effect_input(context, effect, effect->graph->passthrough_input,
 +                requested, depth, out, out_rect);
