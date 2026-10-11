@@ -1,0 +1,68 @@
+diff --git a/dlls/windowscodecs/tests/bitmap.c b/dlls/windowscodecs/tests/bitmap.c
+index b73c0bc740c..58c58564fac 100644
+--- a/dlls/windowscodecs/tests/bitmap.c
++++ b/dlls/windowscodecs/tests/bitmap.c
+@@ -453,6 +453,55 @@ static void test_createbitmap(void)
+     IWICBitmap_Release(bitmap);
+ }
+ 
++static void test_createbitmap_8bppalpha(void)
++{
++    IWICPixelFormatInfo2 *format_info;
++    IWICComponentInfo *info;
++    WICPixelFormatGUID format;
++    BOOL transparency;
++    IWICBitmap *bitmap;
++    BYTE data[8];
++    WICRect rect;
++    UINT value;
++    HRESULT hr;
++
++    hr = IWICImagingFactory_CreateComponentInfo(factory, &GUID_WICPixelFormat8bppAlpha, &info);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    hr = IWICComponentInfo_QueryInterface(info, &IID_IWICPixelFormatInfo2, (void **)&format_info);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    IWICComponentInfo_Release(info);
++
++    hr = IWICPixelFormatInfo2_GetBitsPerPixel(format_info, &value);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(value == 8, "Got unexpected bits per pixel %u.\n", value);
++    hr = IWICPixelFormatInfo2_GetChannelCount(format_info, &value);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(value == 1, "Got unexpected channel count %u.\n", value);
++    hr = IWICPixelFormatInfo2_SupportsTransparency(format_info, &transparency);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(transparency, "Expected transparency support.\n");
++    hr = IWICPixelFormatInfo2_GetNumericRepresentation(format_info, (WICPixelFormatNumericRepresentation *)&value);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(value == WICPixelFormatNumericRepresentationUnsignedInteger, "Got unexpected representation %u.\n", value);
++    IWICPixelFormatInfo2_Release(format_info);
++
++    hr = IWICImagingFactory_CreateBitmap(factory, 4, 2, &GUID_WICPixelFormat8bppAlpha, WICBitmapCacheOnLoad, &bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    hr = IWICBitmap_GetPixelFormat(bitmap, &format);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(IsEqualGUID(&format, &GUID_WICPixelFormat8bppAlpha), "Got unexpected format %s.\n", wine_dbgstr_guid(&format));
++
++    rect.X = 0;
++    rect.Y = 0;
++    rect.Width = 4;
++    rect.Height = 2;
++    memset(data, 0xcc, sizeof(data));
++    hr = IWICBitmap_CopyPixels(bitmap, &rect, 4, sizeof(data), data);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(!data[0] && !data[7], "Got unexpected data %#x, %#x.\n", data[0], data[7]);
++    IWICBitmap_Release(bitmap);
++}
++
+ static void test_createbitmapfromsource(void)
+ {
+     HRESULT hr;
+@@ -1600,6 +1649,7 @@ START_TEST(bitmap)
+ 
+     test_IMILBitmap();
+     test_createbitmap();
++    test_createbitmap_8bppalpha();
+     test_createbitmapfromsource();
+     test_CreateBitmapFromMemory();
+     test_CreateBitmapFromHICON();

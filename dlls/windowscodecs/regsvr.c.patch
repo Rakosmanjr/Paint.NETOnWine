@@ -1,8 +1,26 @@
 diff --git a/dlls/windowscodecs/regsvr.c b/dlls/windowscodecs/regsvr.c
-index 8c2ff060fe0..3f38091d417 100644
+index 8c2ff060fe0..d26f80df5f9 100644
 --- a/dlls/windowscodecs/regsvr.c
 +++ b/dlls/windowscodecs/regsvr.c
-@@ -2456,6 +2456,17 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
+@@ -2280,6 +2280,17 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
+         WICPixelFormatNumericRepresentationUnsignedInteger,
+         0
+     },
++    {   &GUID_WICPixelFormat8bppAlpha,
++        "The Wine Project",
++        "8bpp Alpha",
++        NULL, /* no version */
++        &GUID_VendorMicrosoft,
++        8, /* bitsperpixel */
++        1, /* channel count */
++        channel_masks_8bit,
++        WICPixelFormatNumericRepresentationUnsignedInteger,
++        1
++    },
+     {   &GUID_WICPixelFormat16bppGray,
+         "The Wine Project",
+         "16bpp Grayscale",
+@@ -2456,6 +2467,17 @@ static struct regsvr_pixelformat const pixelformat_list[] = {
          WICPixelFormatNumericRepresentationUnsignedInteger,
          1
      },
