@@ -1,8 +1,35 @@
 diff --git a/dlls/d2d1/geometry.c b/dlls/d2d1/geometry.c
-index b6903d01024..9bfa5397865 100644
+index b6903d01024..e4f2e33911f 100644
 --- a/dlls/d2d1/geometry.c
 +++ b/dlls/d2d1/geometry.c
-@@ -4414,7 +4414,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_CombineWithGeometry(ID2D1Path
+@@ -509,26 +509,12 @@ static void d2d_fp_scale_expansion_zeroelim(float *out, size_t *out_len, const f
+     *out_len = out_idx;
+ }
+ 
+-static void d2d_point_subtract(D2D1_POINT_2F *out,
+-        const D2D1_POINT_2F *a, const D2D1_POINT_2F *b)
+-{
+-    out->x = a->x - b->x;
+-    out->y = a->y - b->y;
+-}
+-
+ static void d2d_point_scale(D2D1_POINT_2F *p, float scale)
+ {
+     p->x *= scale;
+     p->y *= scale;
+ }
+ 
+-static void d2d_point_lerp(D2D1_POINT_2F *out,
+-        const D2D1_POINT_2F *a, const D2D1_POINT_2F *b, float t)
+-{
+-    out->x = a->x * (1.0f - t) + b->x * t;
+-    out->y = a->y * (1.0f - t) + b->y * t;
+-}
+-
+ static void d2d_point_calculate_bezier(D2D1_POINT_2F *out, const D2D1_POINT_2F *p0,
+         const D2D1_POINT_2F *p1, const D2D1_POINT_2F *p2, float t)
+ {
+@@ -4414,7 +4400,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_CombineWithGeometry(ID2D1Path
      FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, geometry, combine_mode, transform, tolerance, sink);
  
@@ -11,7 +38,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Outline(ID2D1PathGeometry1 *iface,
-@@ -4459,7 +4459,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Widen(ID2D1PathGeometry1 *ifa
+@@ -4459,7 +4445,7 @@ static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Widen(ID2D1PathGeometry1 *ifa
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, sink);
  
@@ -20,7 +47,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_path_geometry_Open(ID2D1PathGeometry1 *iface, ID2D1GeometrySink **sink)
-@@ -4801,7 +4801,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_GetBounds(ID2D1EllipseGeom
+@@ -4801,7 +4787,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_GetBounds(ID2D1EllipseGeom
  {
      FIXME("iface %p, transform %p, bounds %p stub!\n", iface, transform, bounds);
  
@@ -29,7 +56,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_GetWidenedBounds(ID2D1EllipseGeometry *iface,
-@@ -4811,7 +4811,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_GetWidenedBounds(ID2D1Elli
+@@ -4811,7 +4797,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_GetWidenedBounds(ID2D1Elli
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, bounds %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, bounds);
  
@@ -38,7 +65,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_StrokeContainsPoint(ID2D1EllipseGeometry *iface,
-@@ -4933,7 +4933,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_CombineWithGeometry(ID2D1E
+@@ -4933,7 +4919,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_CombineWithGeometry(ID2D1E
      FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, geometry, combine_mode, transform, tolerance, sink);
  
@@ -47,7 +74,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_Outline(ID2D1EllipseGeometry *iface,
-@@ -4979,7 +4979,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_Widen(ID2D1EllipseGeometry
+@@ -4979,7 +4965,7 @@ static HRESULT STDMETHODCALLTYPE d2d_ellipse_geometry_Widen(ID2D1EllipseGeometry
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, sink);
  
@@ -56,7 +83,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static void STDMETHODCALLTYPE d2d_ellipse_geometry_GetEllipse(ID2D1EllipseGeometry *iface, D2D1_ELLIPSE *ellipse)
-@@ -5384,7 +5384,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_CombineWithGeometry(ID2D
+@@ -5384,7 +5370,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_CombineWithGeometry(ID2D
      FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, geometry, combine_mode, transform, tolerance, sink);
  
@@ -65,7 +92,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_Outline(ID2D1RectangleGeometry *iface,
-@@ -5449,7 +5449,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_Widen(ID2D1RectangleGeom
+@@ -5449,7 +5435,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rectangle_geometry_Widen(ID2D1RectangleGeom
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, sink);
  
@@ -74,7 +101,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static void STDMETHODCALLTYPE d2d_rectangle_geometry_GetRect(ID2D1RectangleGeometry *iface, D2D1_RECT_F *rect)
-@@ -5658,7 +5658,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_GetBounds(ID2D1R
+@@ -5658,7 +5644,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_GetBounds(ID2D1R
  {
      FIXME("iface %p, transform %p, bounds %p stub!\n", iface, transform, bounds);
  
@@ -83,7 +110,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_GetWidenedBounds(ID2D1RoundedRectangleGeometry *iface,
-@@ -5668,7 +5668,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_GetWidenedBounds
+@@ -5668,7 +5654,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_GetWidenedBounds
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, bounds %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, bounds);
  
@@ -92,7 +119,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_StrokeContainsPoint(
-@@ -5786,7 +5786,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_CombineWithGeome
+@@ -5786,7 +5772,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_CombineWithGeome
      FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, geometry, combine_mode, transform, tolerance, sink);
  
@@ -101,7 +128,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_Outline(ID2D1RoundedRectangleGeometry *iface,
-@@ -5832,7 +5832,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_Widen(ID2D1Round
+@@ -5832,7 +5818,7 @@ static HRESULT STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_Widen(ID2D1Round
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, sink);
  
@@ -110,7 +137,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static void STDMETHODCALLTYPE d2d_rounded_rectangle_geometry_GetRoundedRect(ID2D1RoundedRectangleGeometry *iface,
-@@ -6099,7 +6099,7 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_GetWidenedBounds(ID2D1
+@@ -6099,7 +6085,7 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_GetWidenedBounds(ID2D1
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, bounds %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, bounds);
  
@@ -119,7 +146,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_StrokeContainsPoint(ID2D1TransformedGeometry *iface,
-@@ -6188,7 +6188,7 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_CombineWithGeometry(ID
+@@ -6188,7 +6174,7 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_CombineWithGeometry(ID
      FIXME("iface %p, geometry %p, combine_mode %#x, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, geometry, combine_mode, transform, tolerance, sink);
  
@@ -128,7 +155,7 @@ index b6903d01024..9bfa5397865 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_Outline(ID2D1TransformedGeometry *iface,
-@@ -6239,7 +6239,7 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_Widen(ID2D1Transformed
+@@ -6239,7 +6225,7 @@ static HRESULT STDMETHODCALLTYPE d2d_transformed_geometry_Widen(ID2D1Transformed
      FIXME("iface %p, stroke_width %.8e, stroke_style %p, transform %p, tolerance %.8e, sink %p stub!\n",
              iface, stroke_width, stroke_style, transform, tolerance, sink);
  

@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..f7af7affdbd 100644
+index ba6cea78e06..2ebab6d5de9 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
 @@ -125,6 +125,11 @@ struct d2d_ps_cb
@@ -182,7 +182,28 @@ index ba6cea78e06..f7af7affdbd 100644
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1119,4 +1201,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1031,6 +1113,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
+     return p0->x * p1->x + p0->y * p1->y;
+ }
+ 
++static inline void d2d_point_subtract(D2D1_POINT_2F *out,
++        const D2D1_POINT_2F *a, const D2D1_POINT_2F *b)
++{
++    out->x = a->x - b->x;
++    out->y = a->y - b->y;
++}
++
++static inline void d2d_point_lerp(D2D1_POINT_2F *out,
++        const D2D1_POINT_2F *a, const D2D1_POINT_2F *b, float t)
++{
++    out->x = a->x * (1.0f - t) + b->x * t;
++    out->y = a->y * (1.0f - t) + b->y * t;
++}
++
+ static inline void d2d_point_transform(D2D1_POINT_2F *dst, const D2D1_MATRIX_3X2_F *matrix, float x, float y)
+ {
+     dst->x = x * matrix->_11 + y * matrix->_21 + matrix->_31;
+@@ -1119,4 +1215,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  
