@@ -1,8 +1,25 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..8d95e3f671c 100644
+index ba6cea78e06..232e06688f0 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
-@@ -69,6 +69,59 @@ struct d2d_clip_stack
+@@ -23,6 +23,7 @@
+ #include "wine/list.h"
+ 
+ #include <assert.h>
++#include <float.h>
+ #include <limits.h>
+ #include <stdint.h>
+ #include <stdbool.h>
+@@ -30,7 +31,7 @@
+ #define COBJMACROS
+ #include "d2d1_3.h"
+ #include "d2d1effectauthor.h"
+-#include "d3d11_1.h"
++#include "d3d11_4.h"
+ #ifdef D2D1_INIT_GUID
+ #include "initguid.h"
+ #endif
+@@ -69,6 +70,61 @@ struct d2d_clip_stack
      size_t count;
  };
  
@@ -43,6 +60,8 @@ index ba6cea78e06..8d95e3f671c 100644
 +        const D2D1_STROKE_STYLE_PROPERTIES1 *style, const D2D1_MATRIX_3X2_F *transform,
 +        float tolerance, struct d2d_polyline_set *out);
 +bool d2d_polyline_set_is_rect(const struct d2d_polyline_set *set, D2D1_RECT_F *rect);
++void d2d_polyline_set_get_bounds(const struct d2d_polyline_set *set, D2D1_RECT_F *bounds);
++const D2D1_STROKE_STYLE_PROPERTIES1 *d2d_stroke_style_properties(ID2D1StrokeStyle *stroke_style);
 +
 +/* 8-bit coverage of the pixels in a rectangle of the target. */
 +struct d2d_coverage_mask
@@ -62,7 +81,7 @@ index ba6cea78e06..8d95e3f671c 100644
  struct d2d_error_state
  {
      HRESULT code;
-@@ -116,19 +169,42 @@ struct d2d_brush_cb
+@@ -116,19 +172,42 @@ struct d2d_brush_cb
      } u;
  };
  
@@ -110,7 +129,7 @@ index ba6cea78e06..8d95e3f671c 100644
  
  struct d2d_vs_cb
  {
-@@ -143,6 +219,7 @@ struct d2d_vs_cb
+@@ -143,6 +222,7 @@ struct d2d_vs_cb
  
  struct d2d_device_context_ops
  {
@@ -118,7 +137,7 @@ index ba6cea78e06..8d95e3f671c 100644
      HRESULT (*device_context_present)(IUnknown *outer_unknown);
  };
  
-@@ -170,6 +247,38 @@ struct d2d_indexed_objects
+@@ -170,6 +250,38 @@ struct d2d_indexed_objects
      size_t count;
  };
  
@@ -157,7 +176,7 @@ index ba6cea78e06..8d95e3f671c 100644
  struct d2d_device_context
  {
      ID2D1DeviceContext6 ID2D1DeviceContext6_iface;
-@@ -198,6 +307,12 @@ struct d2d_device_context
+@@ -198,6 +310,12 @@ struct d2d_device_context
          HDC hdc;
      } target;
      struct d2d_shape_resources shape_resources[D2D_SHAPE_TYPE_COUNT];
@@ -170,7 +189,7 @@ index ba6cea78e06..8d95e3f671c 100644
      ID3D11Buffer *vs_cb;
      ID3D11PixelShader *ps;
      ID3D11Buffer *ps_cb;
-@@ -206,6 +321,12 @@ struct d2d_device_context
+@@ -206,6 +324,12 @@ struct d2d_device_context
      ID3D11Buffer *vb;
      ID3D11RasterizerState *rs;
      ID3D11BlendState *bs;
@@ -183,7 +202,7 @@ index ba6cea78e06..8d95e3f671c 100644
      ID3D11SamplerState *sampler_states
              [D2D_SAMPLER_INTERPOLATION_MODE_COUNT]
              [D2D_SAMPLER_EXTEND_MODE_COUNT]
-@@ -219,8 +340,21 @@ struct d2d_device_context
+@@ -219,8 +343,21 @@ struct d2d_device_context
      D2D1_RENDER_TARGET_PROPERTIES desc;
      D2D1_SIZE_U pixel_size;
      struct d2d_clip_stack clip_stack;
@@ -205,7 +224,25 @@ index ba6cea78e06..8d95e3f671c 100644
  };
  
  HRESULT d2d_d3d_create_render_target(struct d2d_device *device, IDXGISurface *surface, IUnknown *outer_unknown,
-@@ -451,10 +585,13 @@ struct d2d_bitmap
+@@ -432,6 +569,7 @@ struct d2d_mesh
+ };
+ 
+ HRESULT d2d_mesh_create(ID2D1Factory *factory, struct d2d_mesh **mesh);
++struct d2d_mesh *unsafe_impl_from_ID2D1Mesh(ID2D1Mesh *iface);
+ 
+ struct d2d_bitmap
+ {
+@@ -443,6 +581,9 @@ struct d2d_bitmap
+     ID3D11RenderTargetView *rtv;
+     IDXGISurface *surface;
+     ID3D11Resource *resource;
++    unsigned int subresource;
++    CRITICAL_SECTION *cs;
++    ID3D11Multithread *multithread;
+     D3D11_MAPPED_SUBRESOURCE mapped_resource;
+     D2D1_SIZE_U pixel_size;
+     D2D1_PIXEL_FORMAT format;
+@@ -451,10 +592,13 @@ struct d2d_bitmap
      D2D1_BITMAP_OPTIONS options;
  };
  
@@ -219,7 +256,15 @@ index ba6cea78e06..8d95e3f671c 100644
  HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
  unsigned int d2d_get_bitmap_options_for_surface(IDXGISurface *surface);
-@@ -803,12 +940,17 @@ struct d2d_transform
+@@ -679,6 +823,7 @@ struct d2d_device
+     ID2D1Factory1 *factory;
+     IDXGIDevice *dxgi_device;
+     bool allow_get_dxgi_device;
++    ID3D11Multithread *multithread;
+ 
+     ID3D10Blob *precompiled_shape_vs[D2D_SHAPE_TYPE_COUNT];
+     ID3D10Blob *precompiled_shape_ps;
+@@ -803,12 +948,17 @@ struct d2d_transform
          D2D1_RECT_L bounds;
      };
  
@@ -237,7 +282,7 @@ index ba6cea78e06..8d95e3f671c 100644
  };
  
  struct d2d_render_info
-@@ -818,6 +960,8 @@ struct d2d_render_info
+@@ -818,6 +968,8 @@ struct d2d_render_info
  
      unsigned int mask;
      GUID pixel_shader;
@@ -246,7 +291,40 @@ index ba6cea78e06..8d95e3f671c 100644
  };
  
  struct d2d_transform_node
-@@ -858,17 +1002,31 @@ struct d2d_effect
+@@ -825,23 +977,26 @@ struct d2d_transform_node
+     struct list entry;
+     ID2D1TransformNode *object;
+     struct d2d_render_info *render_info;
++    /* Each input slot is fed by another node, by one of the effect's
++     * inputs, or nothing. */
+     struct d2d_transform_node **inputs;
++    unsigned int *effect_inputs;
+     unsigned int input_count;
+     struct d2d_transform_node *output;
+-};
+ 
+-struct d2d_transform_node_connection
+-{
+-    struct d2d_transform_node *node;
+-    unsigned int index;
++    /* What the node produces from its inputs, in the effect's coordinate
++     * space, as established at the start of each evaluation. */
++    D2D1_RECT_L output_rect;
++    D2D1_RECT_L opaque_rect;
+ };
+ 
++#define D2D_EFFECT_INPUT_NONE (~0u)
++
+ struct d2d_transform_graph
+ {
+     ID2D1TransformGraph ID2D1TransformGraph_iface;
+     LONG refcount;
+ 
+-    struct d2d_transform_node_connection *inputs;
+     unsigned int input_count;
+ 
+     struct d2d_transform_node *output;
+@@ -858,17 +1013,31 @@ struct d2d_effect
      ID2D1Image ID2D1Image_iface;
      LONG refcount;
  
@@ -278,16 +356,45 @@ index ba6cea78e06..8d95e3f671c 100644
  void d2d_effect_init_properties(struct d2d_effect *effect, struct d2d_effect_properties *properties);
  HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
          UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
-@@ -964,6 +1122,8 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
+@@ -911,6 +1080,16 @@ struct d2d_command_list
+     size_t objects_count;
+     size_t objects_capacity;
+     IUnknown **objects;
++
++    /* The transform in force while recording, and the clips and layers
++     * pushed so far, each already intersected with those enclosing it. The
++     * bounds of what has been recorded are kept in list space; an empty
++     * rect means nothing has been drawn. */
++    D2D1_MATRIX_3X2_F transform;
++    D2D1_RECT_F *clips;
++    size_t clips_size;
++    size_t clip_count;
++    D2D1_RECT_F bounds;
+ };
+ 
+ HRESULT d2d_command_list_create(ID2D1Factory *factory, struct d2d_command_list **command_list);
+@@ -954,8 +1133,8 @@ void d2d_command_list_draw_bitmap(struct d2d_command_list *command_list, ID2D1Bi
+ void d2d_command_list_draw_sprite_batch(struct d2d_command_list *command_list, ID2D1SpriteBatch *sprite_batch,
+         UINT32 start_index, UINT32 sprite_count, ID2D1Bitmap *bitmap, D2D1_BITMAP_INTERPOLATION_MODE interpolation_mode,
+         D2D1_SPRITE_OPTIONS sprite_options);
+-void d2d_command_list_draw_image(struct d2d_command_list *command_list, ID2D1Image *image,
+-        const D2D1_POINT_2F *target_offset, const D2D1_RECT_F *image_rect, D2D1_INTERPOLATION_MODE interpolation_mode,
++void d2d_command_list_draw_image(struct d2d_command_list *command_list, struct d2d_device_context *context,
++        ID2D1Image *image, const D2D1_POINT_2F *target_offset, const D2D1_RECT_F *image_rect, D2D1_INTERPOLATION_MODE interpolation_mode,
+         D2D1_COMPOSITE_MODE composite_mode);
+ void d2d_command_list_fill_mesh(struct d2d_command_list *command_list, const struct d2d_device_context *context,
+         ID2D1Mesh *mesh, ID2D1Brush *orig_brush);
+@@ -964,6 +1143,9 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
  void d2d_command_list_push_layer(struct d2d_command_list *command_list, const struct d2d_device_context *context,
          const D2D1_LAYER_PARAMETERS1 *params);
  void d2d_command_list_pop_layer(struct d2d_command_list *command_list);
 +void d2d_command_list_draw(ID2D1CommandList *iface, struct d2d_device_context *context,
 +        const D2D1_POINT_2F *origin);
++void d2d_command_list_get_bounds(const struct d2d_command_list *command_list, D2D1_RECT_F *bounds);
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1031,6 +1191,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
+@@ -1031,6 +1213,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
      return p0->x * p1->x + p0->y * p1->y;
  }
  
@@ -308,7 +415,110 @@ index ba6cea78e06..8d95e3f671c 100644
  static inline void d2d_point_transform(D2D1_POINT_2F *dst, const D2D1_MATRIX_3X2_F *matrix, float x, float y)
  {
      dst->x = x * matrix->_11 + y * matrix->_21 + matrix->_31;
-@@ -1119,4 +1293,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1049,6 +1245,88 @@ static inline void d2d_rect_expand(D2D1_RECT_F *dst, const D2D1_POINT_2F *point)
+         dst->bottom = point->y;
+ }
+ 
++/* The D3D11 immediate context is not safe to use from several threads at
++ * once, and a sequence of calls on it -- binding a target, then drawing --
++ * has to be kept together. D3D's own device lock is shared by everything
++ * that renders through the device, including other D2D factories and the
++ * application; the factory's lock covers only the factory's own objects. */
++static inline void d2d_lock(CRITICAL_SECTION *cs, ID3D11Multithread *multithread)
++{
++    if (cs)
++        EnterCriticalSection(cs);
++    if (multithread)
++        ID3D11Multithread_Enter(multithread);
++}
++
++static inline void d2d_unlock(CRITICAL_SECTION *cs, ID3D11Multithread *multithread)
++{
++    if (multithread)
++        ID3D11Multithread_Leave(multithread);
++    if (cs)
++        LeaveCriticalSection(cs);
++}
++
++static inline void d2d_rect_set(D2D1_RECT_F *dst, float left, float top, float right, float bottom)
++{
++    dst->left = left;
++    dst->top = top;
++    dst->right = right;
++    dst->bottom = bottom;
++}
++
++static inline void d2d_rect_intersect(D2D1_RECT_F *dst, const D2D1_RECT_F *src)
++{
++    if (src->left > dst->left)
++        dst->left = src->left;
++    if (src->top > dst->top)
++        dst->top = src->top;
++    if (src->right < dst->right)
++        dst->right = src->right;
++    if (src->bottom < dst->bottom)
++        dst->bottom = src->bottom;
++}
++
++static inline void d2d_rect_union(D2D1_RECT_F *dst, const D2D1_RECT_F *src)
++{
++    if (src->left < dst->left)
++        dst->left = src->left;
++    if (src->top < dst->top)
++        dst->top = src->top;
++    if (src->right > dst->right)
++        dst->right = src->right;
++    if (src->bottom > dst->bottom)
++        dst->bottom = src->bottom;
++}
++
++/* A rect with no area; also the representation of "nothing". */
++static inline bool d2d_rect_is_empty(const D2D1_RECT_F *rect)
++{
++    return !(rect->left < rect->right) || !(rect->top < rect->bottom);
++}
++
++/* The bounding rect of a rect taken through a transform. */
++static inline void d2d_rect_transform_bounds(D2D1_RECT_F *dst, const D2D1_MATRIX_3X2_F *matrix,
++        const D2D1_RECT_F *src)
++{
++    D2D1_RECT_F r = *src;
++    D2D1_POINT_2F p;
++
++    d2d_point_transform(&p, matrix, r.left, r.top);
++    d2d_rect_set(dst, p.x, p.y, p.x, p.y);
++    d2d_point_transform(&p, matrix, r.right, r.top);
++    d2d_rect_expand(dst, &p);
++    d2d_point_transform(&p, matrix, r.right, r.bottom);
++    d2d_rect_expand(dst, &p);
++    d2d_point_transform(&p, matrix, r.left, r.bottom);
++    d2d_rect_expand(dst, &p);
++}
++
++/* An upper bound on how much a transform scales any length. */
++static inline float d2d_matrix_scale_bound(const D2D1_MATRIX_3X2_F *m)
++{
++    return sqrtf(m->_11 * m->_11 + m->_12 * m->_12 + m->_21 * m->_21 + m->_22 * m->_22);
++}
++
+ static inline D2D1_INTERPOLATION_MODE d2d1_1_interp_mode_from_d2d1(D2D1_BITMAP_INTERPOLATION_MODE mode)
+ {
+     return (D2D1_INTERPOLATION_MODE)mode;
+@@ -1082,6 +1360,13 @@ static inline const char *debug_d2d_point_2u(const D2D1_POINT_2U *point)
+     return wine_dbg_sprintf("{%u, %u}", point->x, point->y);
+ }
+ 
++static inline const char *debug_d2d_matrix_3x2_f(const D2D1_MATRIX_3X2_F *m)
++{
++    if (!m)
++        return "(null)";
++    return wine_dbg_sprintf("{%.8e, %.8e, %.8e, %.8e, %.8e, %.8e}", m->_11, m->_12, m->_21, m->_22, m->_31, m->_32);
++}
++
+ static inline const char *debug_d2d_rect_f(const D2D1_RECT_F *rect)
+ {
+     if (!rect)
+@@ -1119,4 +1404,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  

@@ -1,8 +1,69 @@
 diff --git a/dlls/d2d1/bitmap.c b/dlls/d2d1/bitmap.c
-index c6ab60c1bc4..8eb25c67a67 100644
+index c6ab60c1bc4..ff88f911f2a 100644
 --- a/dlls/d2d1/bitmap.c
 +++ b/dlls/d2d1/bitmap.c
-@@ -357,11 +357,7 @@ static const struct ID2D1Bitmap1Vtbl d2d_bitmap_vtbl =
+@@ -36,7 +36,9 @@ static HRESULT d2d_bitmap_unmap(struct d2d_bitmap *bitmap)
+ 
+     ID3D11Resource_GetDevice(bitmap->resource, &device);
+     ID3D11Device_GetImmediateContext(device, &context);
+-    ID3D11DeviceContext_Unmap(context, bitmap->resource, 0);
++    d2d_lock(bitmap->cs, bitmap->multithread);
++    ID3D11DeviceContext_Unmap(context, bitmap->resource, bitmap->subresource);
++    d2d_unlock(bitmap->cs, bitmap->multithread);
+     ID3D11DeviceContext_Release(context);
+     ID3D11Device_Release(device);
+ 
+@@ -92,6 +94,8 @@ static ULONG STDMETHODCALLTYPE d2d_bitmap_Release(ID2D1Bitmap1 *iface)
+         if (bitmap->surface)
+             IDXGISurface_Release(bitmap->surface);
+         ID3D11Resource_Release(bitmap->resource);
++        if (bitmap->multithread)
++            ID3D11Multithread_Release(bitmap->multithread);
+         ID2D1Factory_Release(bitmap->factory);
+         free(bitmap);
+     }
+@@ -173,9 +177,11 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromBitmap(ID2D1Bitmap1 *iface,
+ 
+     ID3D11Resource_GetDevice(dst_bitmap->resource, &device);
+     ID3D11Device_GetImmediateContext(device, &context);
+-    ID3D11DeviceContext_CopySubresourceRegion(context, dst_bitmap->resource, 0,
++    d2d_lock(dst_bitmap->cs, dst_bitmap->multithread);
++    ID3D11DeviceContext_CopySubresourceRegion(context, dst_bitmap->resource, dst_bitmap->subresource,
+             dst_point ? dst_point->x : 0, dst_point ? dst_point->y : 0, 0,
+-            src_bitmap->resource, 0, src_rect ? &box : NULL);
++            src_bitmap->resource, src_bitmap->subresource, src_rect ? &box : NULL);
++    d2d_unlock(dst_bitmap->cs, dst_bitmap->multithread);
+     ID3D11DeviceContext_Release(context);
+     ID3D11Device_Release(device);
+ 
+@@ -240,7 +246,10 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_CopyFromMemory(ID2D1Bitmap1 *iface,
+ 
+     ID3D11Resource_GetDevice(bitmap->resource, &device);
+     ID3D11Device_GetImmediateContext(device, &context);
+-    ID3D11DeviceContext_UpdateSubresource(context, bitmap->resource, 0, dst_rect ? &box : NULL, src_data, pitch, 0);
++    d2d_lock(bitmap->cs, bitmap->multithread);
++    ID3D11DeviceContext_UpdateSubresource(context, bitmap->resource, bitmap->subresource,
++            dst_rect ? &box : NULL, src_data, pitch, 0);
++    d2d_unlock(bitmap->cs, bitmap->multithread);
+     ID3D11DeviceContext_Release(context);
+     ID3D11Device_Release(device);
+ 
+@@ -308,11 +317,13 @@ static HRESULT STDMETHODCALLTYPE d2d_bitmap_Map(ID2D1Bitmap1 *iface, D2D1_MAP_OP
+ 
+     ID3D11Resource_GetDevice(bitmap->resource, &device);
+     ID3D11Device_GetImmediateContext(device, &context);
+-    if (SUCCEEDED(hr = ID3D11DeviceContext_Map(context, bitmap->resource, 0, map_type,
++    d2d_lock(bitmap->cs, bitmap->multithread);
++    if (SUCCEEDED(hr = ID3D11DeviceContext_Map(context, bitmap->resource, bitmap->subresource, map_type,
+             0, &mapped_resource)))
+     {
+         bitmap->mapped_resource = mapped_resource;
+     }
++    d2d_unlock(bitmap->cs, bitmap->multithread);
+     ID3D11DeviceContext_Release(context);
+     ID3D11Device_Release(device);
+ 
+@@ -357,11 +368,7 @@ static const struct ID2D1Bitmap1Vtbl d2d_bitmap_vtbl =
      d2d_bitmap_Unmap,
  };
  
@@ -15,7 +76,7 @@ index c6ab60c1bc4..8eb25c67a67 100644
      {
          {DXGI_FORMAT_R32G32B32A32_FLOAT,    D2D1_ALPHA_MODE_PREMULTIPLIED},
          {DXGI_FORMAT_R32G32B32A32_FLOAT,    D2D1_ALPHA_MODE_IGNORE       },
-@@ -380,7 +376,11 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
+@@ -380,7 +387,11 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
          {DXGI_FORMAT_B8G8R8X8_UNORM,        D2D1_ALPHA_MODE_IGNORE       },
          {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   D2D1_ALPHA_MODE_PREMULTIPLIED},
          {DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,   D2D1_ALPHA_MODE_IGNORE       },
@@ -28,7 +89,7 @@ index c6ab60c1bc4..8eb25c67a67 100644
  
      for (i = 0; i < ARRAY_SIZE(supported_formats); ++i)
      {
-@@ -392,6 +392,21 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
+@@ -392,16 +403,41 @@ static BOOL format_supported(const D2D1_PIXEL_FORMAT *format)
      return FALSE;
  }
  
@@ -48,9 +109,146 @@ index c6ab60c1bc4..8eb25c67a67 100644
 +}
 +
  static void d2d_bitmap_init(struct d2d_bitmap *bitmap, struct d2d_device_context *context,
-         ID3D11Resource *resource, D2D1_SIZE_U size, const D2D1_BITMAP_PROPERTIES1 *desc)
+-        ID3D11Resource *resource, D2D1_SIZE_U size, const D2D1_BITMAP_PROPERTIES1 *desc)
++        ID3D11Resource *resource, unsigned int subresource, D2D1_SIZE_U size, const D2D1_BITMAP_PROPERTIES1 *desc)
  {
-@@ -680,11 +695,123 @@ HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid,
++    D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc;
++    D3D11_RENDER_TARGET_VIEW_DESC rtv_desc;
++    unsigned int mip = 0, slice = 0;
++    D3D11_TEXTURE2D_DESC texture_desc;
++    ID3D11Texture2D *texture;
+     ID3D11Device *d3d_device;
++    bool view_descs = false;
+     HRESULT hr;
+ 
+     bitmap->ID2D1Bitmap1_iface.lpVtbl = &d2d_bitmap_vtbl;
+     bitmap->refcount = 1;
+     ID2D1Factory_AddRef(bitmap->factory = context->factory);
+     ID3D11Resource_AddRef(bitmap->resource = resource);
++    bitmap->subresource = subresource;
++    bitmap->cs = context->cs;
++    if ((bitmap->multithread = context->device->multithread))
++        ID3D11Multithread_AddRef(bitmap->multithread);
+     bitmap->pixel_size = size;
+     bitmap->format = desc->pixelFormat;
+     bitmap->dpi_x = desc->dpiX;
+@@ -411,16 +447,55 @@ static void d2d_bitmap_init(struct d2d_bitmap *bitmap, struct d2d_device_context
+     if (d2d_device_context_is_dxgi_target(context))
+         ID3D11Resource_QueryInterface(resource, &IID_IDXGISurface, (void **)&bitmap->surface);
+ 
++    /* A bitmap may be one subresource of a texture with several, such as a
++     * slice of an array; the views have to select it. */
+     ID3D11Resource_GetDevice(resource, &d3d_device);
++    if (SUCCEEDED(ID3D11Resource_QueryInterface(resource, &IID_ID3D11Texture2D, (void **)&texture)))
++    {
++        ID3D11Texture2D_GetDesc(texture, &texture_desc);
++        ID3D11Texture2D_Release(texture);
++        if (texture_desc.MipLevels)
++        {
++            mip = subresource % texture_desc.MipLevels;
++            slice = subresource / texture_desc.MipLevels;
++        }
++        if (slice >= texture_desc.ArraySize)
++            WARN("Subresource %u is beyond the texture's %u slices.\n", subresource, texture_desc.ArraySize);
++        if (texture_desc.ArraySize > 1)
++        {
++            rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2DARRAY;
++            rtv_desc.Texture2DArray.MipSlice = mip;
++            rtv_desc.Texture2DArray.FirstArraySlice = slice;
++            rtv_desc.Texture2DArray.ArraySize = 1;
++            srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
++            srv_desc.Texture2DArray.MostDetailedMip = mip;
++            srv_desc.Texture2DArray.MipLevels = 1;
++            srv_desc.Texture2DArray.FirstArraySlice = slice;
++            srv_desc.Texture2DArray.ArraySize = 1;
++        }
++        else
++        {
++            rtv_desc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
++            rtv_desc.Texture2D.MipSlice = mip;
++            srv_desc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
++            srv_desc.Texture2D.MostDetailedMip = mip;
++            srv_desc.Texture2D.MipLevels = 1;
++        }
++        rtv_desc.Format = texture_desc.Format;
++        srv_desc.Format = texture_desc.Format;
++        view_descs = texture_desc.ArraySize > 1 || texture_desc.MipLevels > 1;
++    }
+     if (bitmap->options & D2D1_BITMAP_OPTIONS_TARGET)
+     {
+-        if (FAILED(hr = ID3D11Device_CreateRenderTargetView(d3d_device, resource, NULL, &bitmap->rtv)))
++        if (FAILED(hr = ID3D11Device_CreateRenderTargetView(d3d_device, resource,
++                view_descs ? &rtv_desc : NULL, &bitmap->rtv)))
+             WARN("Failed to create RTV, hr %#lx.\n", hr);
+     }
+ 
+     if (!(bitmap->options & D2D1_BITMAP_OPTIONS_CANNOT_DRAW))
+     {
+-        if (FAILED(hr = ID3D11Device_CreateShaderResourceView(d3d_device, resource, NULL, &bitmap->srv)))
++        if (FAILED(hr = ID3D11Device_CreateShaderResourceView(d3d_device, resource,
++                view_descs ? &srv_desc : NULL, &bitmap->srv)))
+             WARN("Failed to create SRV, hr %#lx.\n", hr);
+     }
+     ID3D11Device_Release(d3d_device);
+@@ -516,7 +591,7 @@ HRESULT d2d_bitmap_create(struct d2d_device_context *context, D2D1_SIZE_U size,
+ 
+     if ((*bitmap = calloc(1, sizeof(**bitmap))))
+     {
+-        d2d_bitmap_init(*bitmap, context, (ID3D11Resource *)texture, size, desc);
++        d2d_bitmap_init(*bitmap, context, (ID3D11Resource *)texture, 0, size, desc);
+         TRACE("Created bitmap %p.\n", *bitmap);
+     }
+     ID3D11Texture2D_Release(texture);
+@@ -605,7 +680,7 @@ HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid,
+             goto failed;
+         }
+ 
+-        d2d_bitmap_init(*bitmap, context, src_impl->resource, src_impl->pixel_size, desc);
++        d2d_bitmap_init(*bitmap, context, src_impl->resource, src_impl->subresource, src_impl->pixel_size, desc);
+         TRACE("Created bitmap %p.\n", *bitmap);
+ 
+     failed:
+@@ -616,16 +691,29 @@ HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid,
+     {
+         DXGI_SURFACE_DESC surface_desc;
+         IDXGISurface *surface = data;
++        unsigned int subresource = 0;
+         ID3D11Resource *resource;
++        IDXGISurface2 *surface2;
+         D2D1_SIZE_U pixel_size;
+         ID3D11Device *device;
+         HRESULT hr;
+ 
+-        if (FAILED(IDXGISurface_QueryInterface(surface, &IID_ID3D11Resource, (void **)&resource)))
++        /* A surface may stand for one subresource of its texture. */
++        if (SUCCEEDED(IDXGISurface_QueryInterface(surface, &IID_IDXGISurface2, (void **)&surface2)))
++        {
++            hr = IDXGISurface2_GetResource(surface2, &IID_ID3D11Resource, (void **)&resource, &subresource);
++            IDXGISurface2_Release(surface2);
++        }
++        else
++        {
++            hr = IDXGISurface_QueryInterface(surface, &IID_ID3D11Resource, (void **)&resource);
++        }
++        if (FAILED(hr))
+         {
+-            WARN("Failed to get d3d resource from dxgi surface.\n");
++            WARN("Failed to get d3d resource from dxgi surface, hr %#lx.\n", hr);
+             return E_FAIL;
+         }
++        TRACE("Surface %p is subresource %u of resource %p.\n", surface, subresource, resource);
+ 
+         ID3D11Resource_GetDevice(resource, &device);
+         ID3D11Device_Release(device);
+@@ -673,18 +761,130 @@ HRESULT d2d_bitmap_create_shared(struct d2d_device_context *context, REFIID iid,
+         pixel_size.width = surface_desc.Width;
+         pixel_size.height = surface_desc.Height;
+ 
+-        d2d_bitmap_init(*bitmap, context, resource, pixel_size, &d);
++        d2d_bitmap_init(*bitmap, context, resource, subresource, pixel_size, &d);
+         ID3D11Resource_Release(resource);
+         TRACE("Created bitmap %p.\n", *bitmap);
+ 
          return S_OK;
      }
  
@@ -174,7 +372,7 @@ index c6ab60c1bc4..8eb25c67a67 100644
  HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap)
  {
-@@ -710,6 +837,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -710,6 +910,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
          {&GUID_WICPixelFormat32bppPRGBA, {DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}},
          {&GUID_WICPixelFormat32bppBGR,   {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
          {&GUID_WICPixelFormat32bppRGB,   {DXGI_FORMAT_R8G8B8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}},
@@ -183,7 +381,7 @@ index c6ab60c1bc4..8eb25c67a67 100644
      };
  
      if (FAILED(hr = IWICBitmapSource_GetSize(bitmap_source, &size.width, &size.height)))
-@@ -742,6 +871,7 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -742,6 +944,7 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
      {
          if (IsEqualGUID(&wic_format, format_lookup[i].wic))
          {
@@ -191,7 +389,7 @@ index c6ab60c1bc4..8eb25c67a67 100644
              d2d_format = &format_lookup[i].d2d;
              break;
          }
-@@ -750,7 +880,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -750,7 +953,8 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
      if (!d2d_format)
      {
          WARN("Unsupported WIC bitmap format %s.\n", debugstr_guid(&wic_format));
@@ -201,7 +399,7 @@ index c6ab60c1bc4..8eb25c67a67 100644
      }
  
      if (bitmap_desc.pixelFormat.format == DXGI_FORMAT_UNKNOWN)
-@@ -760,10 +891,17 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
+@@ -760,10 +964,17 @@ HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IW
  
      switch (bitmap_desc.pixelFormat.format)
      {

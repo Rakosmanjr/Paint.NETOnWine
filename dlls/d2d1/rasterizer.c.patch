@@ -1,9 +1,9 @@
 diff --git a/dlls/d2d1/rasterizer.c b/dlls/d2d1/rasterizer.c
 new file mode 100644
-index 00000000000..5ab19c7242c
+index 00000000000..b7210dd3d70
 --- /dev/null
 +++ b/dlls/d2d1/rasterizer.c
-@@ -0,0 +1,951 @@
+@@ -0,0 +1,975 @@
 +/*
 + * Copyright 2026 James Rakos
 + *
@@ -284,6 +284,30 @@ index 00000000000..5ab19c7242c
 +        return hr;
 +
 +    return set->hr;
++}
++
++/* The bounds of every point in the set; empty if there are none. */
++void d2d_polyline_set_get_bounds(const struct d2d_polyline_set *set, D2D1_RECT_F *bounds)
++{
++    size_t i;
++
++    d2d_rect_set(bounds, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
++    for (i = 0; i < set->point_count; ++i)
++        d2d_rect_expand(bounds, &set->points[i]);
++}
++
++/* The properties a stroke is built with: those of the style, or the
++ * defaults for a stroke drawn without one. */
++const D2D1_STROKE_STYLE_PROPERTIES1 *d2d_stroke_style_properties(ID2D1StrokeStyle *stroke_style)
++{
++    static const D2D1_STROKE_STYLE_PROPERTIES1 default_style =
++    {
++        D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.0f,
++        D2D1_DASH_STYLE_SOLID, 0.0f, D2D1_STROKE_TRANSFORM_TYPE_NORMAL,
++    };
++    const struct d2d_stroke_style *style = unsafe_impl_from_ID2D1StrokeStyle(stroke_style);
++
++    return style ? &style->desc : &default_style;
 +}
 +
 +/* Whether the set is a single axis-aligned rectangle, which has a closed
