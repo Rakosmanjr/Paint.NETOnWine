@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..b9c90c3e24e 100644
+index 94aa4586184..2a76972afcd 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -36,6 +36,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
@@ -27,7 +27,7 @@ index 94aa4586184..b9c90c3e24e 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      todo_wine
      ok(get_refcount(wic_lock) > refcount, "Unexpected refcount.\n");
-@@ -9745,6 +9747,413 @@ static void test_layer(BOOL d3d11)
+@@ -9745,6 +9747,408 @@ static void test_layer(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -333,21 +333,16 @@ index 94aa4586184..b9c90c3e24e 100644
 +    layer_desc.opacityBrush = NULL;
 +    layer_desc.layerOptions = D2D1_LAYER_OPTIONS_NONE;
 +
-+    /* "If Flush is called before all outstanding layers are popped, the
-+     * render target is placed into an error state, and an error is
-+     * returned." */
++    /* The documentation for Flush() says that flushing with a layer pushed
++     * puts the target into an error state. Windows reports no error, either
++     * from Flush() or from the EndDraw() that follows. */
 +    ID2D1RenderTarget_BeginDraw(rt);
 +    ID2D1RenderTarget_PushLayer(rt, &layer_desc, layer);
 +    hr = ID2D1RenderTarget_Flush(rt, NULL, NULL);
-+    ok(FAILED(hr), "Got unexpected hr %#lx flushing with a layer pushed.\n", hr);
++    ok(hr == S_OK, "Got unexpected hr %#lx flushing with a layer pushed.\n", hr);
 +    ID2D1RenderTarget_PopLayer(rt);
 +    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-+    ok(FAILED(hr), "Got unexpected hr %#lx.\n", hr);
-+
-+    /* "The error state can be cleared by a call to EndDraw." */
-+    ID2D1RenderTarget_BeginDraw(rt);
-+    hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-+    ok(hr == S_OK, "Got unexpected hr %#lx after clearing the error state.\n", hr);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +
 +    /* "You must call the PopLayer method before you call the EndDraw
 +     * method." */
@@ -441,7 +436,7 @@ index 94aa4586184..b9c90c3e24e 100644
  static void test_bezier_intersect(BOOL d3d11)
  {
      D2D1_POINT_2F point = {0.0f, 0.0f};
-@@ -10899,7 +11308,6 @@ static void test_command_list(BOOL d3d11)
+@@ -10899,7 +11303,6 @@ static void test_command_list(BOOL d3d11)
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      hr = ID2D1CommandList_Close(command_list);
@@ -449,7 +444,7 @@ index 94aa4586184..b9c90c3e24e 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      ID2D1CommandList_Release(command_list);
-@@ -12155,6 +12563,10 @@ static ULONG STDMETHODCALLTYPE effect_impl_Release(ID2D1EffectImpl *iface)
+@@ -12155,6 +12558,10 @@ static ULONG STDMETHODCALLTYPE effect_impl_Release(ID2D1EffectImpl *iface)
              ID2D1EffectContext_Release(effect_impl->effect_context);
          if (effect_impl->draw_info)
              ID2D1DrawInfo_Release(effect_impl->draw_info);
@@ -460,7 +455,7 @@ index 94aa4586184..b9c90c3e24e 100644
          free(effect_impl->blob.data);
          free(effect_impl);
      }
-@@ -13492,7 +13904,6 @@ static void test_effect_2d_affine(BOOL d3d11)
+@@ -13492,7 +13899,6 @@ static void test_effect_2d_affine(BOOL d3d11)
          ID2D1Effect_GetOutput(effect, &output);
  
          hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -468,7 +463,7 @@ index 94aa4586184..b9c90c3e24e 100644
          ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
          todo_wine
          ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 1),
-@@ -13631,9 +14042,7 @@ static void test_effect_crop(BOOL d3d11)
+@@ -13631,9 +14037,7 @@ static void test_effect_crop(BOOL d3d11)
  
          set_rect(&output_bounds, -1.0f, -1.0f, -1.0f, -1.0f);
          hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -478,7 +473,7 @@ index 94aa4586184..b9c90c3e24e 100644
          ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 0),
                  "Got unexpected output bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
                  output_bounds.left, output_bounds.top, output_bounds.right, output_bounds.bottom,
-@@ -13716,7 +14125,7 @@ static void test_effect_grayscale(BOOL d3d11)
+@@ -13716,7 +14120,7 @@ static void test_effect_grayscale(BOOL d3d11)
                  + 0.587f * ((pixel >> 8) & 0xff)
                  + 0.114f * ((pixel >> 0) & 0xff) + 0.5f);
          expected_colour = (pixel & 0xff000000) | (luminance << 16) | (luminance << 8) | luminance;
@@ -487,7 +482,7 @@ index 94aa4586184..b9c90c3e24e 100644
                  "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
          release_resource_readback(&rb);
  
-@@ -13729,51 +14138,140 @@ static void test_effect_grayscale(BOOL d3d11)
+@@ -13729,44 +14133,133 @@ static void test_effect_grayscale(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -553,18 +548,8 @@ index 94aa4586184..b9c90c3e24e 100644
 +    for (i = 0; i < ARRAY_SIZE(test_pixels); ++i)
      {
 -        hr = ID2D1Effect_GetPropertyName(effect, properties[i].index, name, 64);
--        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
--        ok(!wcscmp(name, properties[i].name), "Unexpected name %s.\n", wine_dbgstr_w(name));
 +        DWORD pixel = test_pixels[i];
- 
--        hr = ID2D1Effect_GetSubProperties(effect, properties[i].index, &subprops);
--        todo_wine
--        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
--        if (SUCCEEDED(hr))
--        {
--            count = ID2D1Properties_GetPropertyCount(subprops);
--            ok(!count, "Got unexpected property count %u.\n", count);
--            ID2D1Properties_Release(subprops);
++
 +        winetest_push_context("Test %u", i);
 +
 +        set_size_u(&input_size, 1, 1);
@@ -576,8 +561,10 @@ index 94aa4586184..b9c90c3e24e 100644
 +        bitmap_desc.colorContext = NULL;
 +        hr = ID2D1DeviceContext_CreateBitmap(context, input_size, &pixel, sizeof(pixel),
 +                &bitmap_desc, &bitmap);
-+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-+
+         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+-        ok(!wcscmp(name, properties[i].name), "Unexpected name %s.\n", wine_dbgstr_w(name));
+ 
+-        hr = ID2D1Effect_GetSubProperties(effect, properties[i].index, &subprops);
 +        ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
 +        ID2D1Effect_GetOutput(effect, &output);
 +
@@ -643,17 +630,10 @@ index 94aa4586184..b9c90c3e24e 100644
 +        ok(!wcscmp(name, properties[i].name), "Unexpected name %s.\n", wine_dbgstr_w(name));
 +
 +        hr = ID2D1Effect_GetSubProperties(effect, properties[i].index, &subprops);
-+        todo_wine
-+        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-+        if (SUCCEEDED(hr))
-+        {
-+            count = ID2D1Properties_GetPropertyCount(subprops);
-+            ok(!count, "Got unexpected property count %u.\n", count);
-+            ID2D1Properties_Release(subprops);
-         }
-     }
- 
-@@ -14087,9 +14585,7 @@ static void test_effect_flood(BOOL d3d11)
+         todo_wine
+         ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+         if (SUCCEEDED(hr))
+@@ -14087,9 +14580,7 @@ static void test_effect_flood(BOOL d3d11)
      ID2D1Effect_GetOutput(effect, &output);
  
      hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
@@ -663,7 +643,7 @@ index 94aa4586184..b9c90c3e24e 100644
      ok(compare_rect(&bounds, -bound, -bound, bound, bound, 0),
              "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
              bounds.left, bounds.top, bounds.right, bounds.bottom);
-@@ -14110,7 +14606,6 @@ static void test_effect_flood(BOOL d3d11)
+@@ -14110,7 +14601,6 @@ static void test_effect_flood(BOOL d3d11)
      hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      match = compare_surface(&ctx, "6527ec83b4039c895b50f9b3e144fe0cf90d1889");
@@ -671,7 +651,7 @@ index 94aa4586184..b9c90c3e24e 100644
      ok(match, "Surface does not match.\n");
  
      ID2D1Image_Release(output);
-@@ -15114,7 +15609,6 @@ static void test_border_transform(BOOL d3d11)
+@@ -15114,7 +15604,6 @@ static void test_border_transform(BOOL d3d11)
      todo_wine
      ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
      hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
@@ -679,7 +659,7 @@ index 94aa4586184..b9c90c3e24e 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      /* Set extend mode */
-@@ -16638,6 +17132,187 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
+@@ -16638,6 +17127,187 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
      ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
  }
  
@@ -867,7 +847,7 @@ index 94aa4586184..b9c90c3e24e 100644
  static void test_effect_custom_pixel_shader(BOOL d3d11)
  {
      static const WCHAR *description =
-@@ -16723,7 +17398,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16723,7 +17393,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      get_surface_readback(&ctx, &rb);
      colour = get_readback_colour(&rb, 0, 0);
      expected_colour = 0x661a334c;
@@ -876,7 +856,7 @@ index 94aa4586184..b9c90c3e24e 100644
              "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
      release_resource_readback(&rb);
  
-@@ -16735,6 +17410,1507 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16735,6 +17405,1507 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -2384,7 +2364,7 @@ index 94aa4586184..b9c90c3e24e 100644
  static void test_get_effect_properties(BOOL d3d11)
  {
      ID2D1Properties *properties, *properties2;
-@@ -18357,6 +20533,12 @@ START_TEST(d2d1)
+@@ -18357,6 +20528,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -2397,7 +2377,7 @@ index 94aa4586184..b9c90c3e24e 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +20562,7 @@ START_TEST(d2d1)
+@@ -18380,6 +20557,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -2405,7 +2385,7 @@ index 94aa4586184..b9c90c3e24e 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18399,6 +20582,7 @@ START_TEST(d2d1)
+@@ -18399,6 +20577,7 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_3d_transform);
      queue_d3d10_test(test_effect_color_management);
      queue_test(test_transform_graph);
@@ -2413,7 +2393,7 @@ index 94aa4586184..b9c90c3e24e 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,6 +20592,17 @@ START_TEST(d2d1)
+@@ -18408,6 +20587,17 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
