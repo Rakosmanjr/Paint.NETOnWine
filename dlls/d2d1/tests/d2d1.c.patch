@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..a88e0b15622 100644
+index 94aa4586184..9ba3b445969 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -18,6 +18,7 @@
@@ -2283,7 +2283,7 @@ index 94aa4586184..a88e0b15622 100644
      DWORD pixel;
      HRESULT hr;
  
-@@ -16680,1617 +18497,6323 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16680,1617 +18497,6505 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
          return;
  
      context = ctx.context;
@@ -4860,6 +4860,188 @@ index 94aa4586184..a88e0b15622 100644
 +    ID2D1Effect_Release(effect);
 +    for (i = 0; i < ARRAY_SIZE(bitmap); ++i)
 +        ID2D1Bitmap1_Release(bitmap[i]);
++    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    release_test_context(&ctx);
++}
++
++/* A draw transform that asks for a filter for its input, if one is set. */
++static const D2D1_FILTER *filter_effect_filter;
++static HRESULT filter_effect_hr[3];
++
++static HRESULT STDMETHODCALLTYPE filter_transform_SetDrawInfo(ID2D1DrawTransform *iface,
++        ID2D1DrawInfo *info)
++{
++    D2D1_INPUT_DESCRIPTION input_desc;
++    HRESULT hr;
++
++    if (FAILED(hr = ID2D1DrawInfo_SetPixelShader(info, &GUID_TestSampleShader, 0)))
++        return hr;
++    if (!filter_effect_filter)
++        return S_OK;
++
++    input_desc.filter = D2D1_FILTER_MIN_MAG_MIP_POINT;
++    input_desc.levelOfDetailCount = 0;
++    filter_effect_hr[0] = ID2D1DrawInfo_SetInputDescription(info, 1, input_desc);
++    input_desc.filter = 0x2;
++    filter_effect_hr[1] = ID2D1DrawInfo_SetInputDescription(info, 0, input_desc);
++    input_desc.filter = *filter_effect_filter;
++    filter_effect_hr[2] = ID2D1DrawInfo_SetInputDescription(info, 0, input_desc);
++
++    return S_OK;
++}
++
++static const ID2D1DrawTransformVtbl filter_transform_vtbl =
++{
++    effect_impl_draw_transform_QueryInterface,
++    effect_impl_draw_transform_AddRef,
++    effect_impl_draw_transform_Release,
++    effect_impl_draw_transform_GetInputCount,
++    effect_impl_draw_transform_MapOutputRectToInputRects,
++    effect_impl_draw_transform_MapInputRectsToOutputRect,
++    effect_impl_draw_transform_MapInvalidRect,
++    filter_transform_SetDrawInfo,
++};
++
++static HRESULT STDMETHODCALLTYPE filter_effect_impl_create(IUnknown **effect_impl)
++{
++    struct effect_impl *object;
++
++    if (!(object = calloc(1, sizeof(*object))))
++        return E_OUTOFMEMORY;
++
++    object->ID2D1EffectImpl_iface.lpVtbl = &custom_effect_impl_vtbl;
++    object->ID2D1DrawTransform_iface.lpVtbl = &filter_transform_vtbl;
++    object->refcount = 1;
++
++    *effect_impl = (IUnknown *)&object->ID2D1EffectImpl_iface;
++    return S_OK;
++}
++
++/* The filter a draw transform asks for is the one its shader samples its
++ * input with. */
++static void test_effect_input_filter(BOOL d3d11)
++{
++    static const WCHAR *description =
++        L"<?xml version='1.0'?>                                                       \
++            <Effect>                                                                  \
++                <Property name='DisplayName' type='string' value='Filter'/>           \
++                <Property name='Author'      type='string' value='The Wine Project'/> \
++                <Property name='Category'    type='string' value='Test'/>             \
++                <Property name='Description' type='string' value='Test effect.'/>     \
++                <Inputs>                                                              \
++                    <Input name='Source'/>                                            \
++                </Inputs>                                                             \
++            </Effect>                                                                 \
++        ";
++    /* Sample a quarter of a texel to the right of the pixel. */
++    static const char ps_code[] =
++        "Texture2D InputTexture : register(t0);\n"
++        "SamplerState InputSampler : register(s0);\n"
++        "\n"
++        "float4 main(float4 clip : SV_POSITION, float4 scene : SCENE_POSITION,\n"
++        "        float4 uv : TEXCOORD0) : SV_TARGET\n"
++        "{\n"
++        "    return InputTexture.Sample(InputSampler, uv.xy + float2(uv.z * 0.25, 0.0));\n"
++        "}";
++    static const D2D1_FILTER point = D2D1_FILTER_MIN_MAG_MIP_POINT;
++    static const D2D1_FILTER linear = D2D1_FILTER_MIN_MAG_MIP_LINEAR;
++    static const D2D1_FILTER min_linear = D2D1_FILTER_MIN_LINEAR_MAG_MIP_POINT;
++    static const D2D1_FILTER mag_linear = D2D1_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
++    static const struct
++    {
++        const D2D1_FILTER *filter;
++        DWORD colour;
++    }
++    tests[] =
++    {
++        {NULL,        0xffbf0040},
++        {&point,      0xffff0000},
++        {&linear,     0xffbf0040},
++        {&min_linear, 0xffff0000},
++        {&mag_linear, 0xffbf0040},
++    };
++    static const DWORD pixels[2] = {0xffff0000, 0xff0000ff};
++    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
++    struct d2d1_test_context ctx;
++    struct resource_readback rb;
++    ID2D1DeviceContext *context;
++    ID2D1Factory1 *factory;
++    ID2D1Bitmap1 *bitmap;
++    ID2D1Image *output;
++    ID2D1Effect *effect;
++    D2D1_SIZE_U size;
++    unsigned int i;
++    DWORD colour;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    context = ctx.context;
++    if (!(factory = ctx.factory1))
++    {
++        win_skip("ID2D1Factory1 is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    preload_shader("ps_4_0", ps_code, &GUID_TestSampleShader, &ctx);
++
++    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, description,
++            NULL, 0, filter_effect_impl_create);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    set_size_u(&size, 2, 1);
++    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
++    bitmap_desc.dpiX = 96.0f;
++    bitmap_desc.dpiY = 96.0f;
++    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
++    bitmap_desc.colorContext = NULL;
++    hr = ID2D1DeviceContext_CreateBitmap(context, size, pixels, sizeof(pixels), &bitmap_desc, &bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    for (i = 0; i < ARRAY_SIZE(tests); ++i)
++    {
++        winetest_push_context("Test %u", i);
++
++        filter_effect_filter = tests[i].filter;
++        memset(filter_effect_hr, 0xcc, sizeof(filter_effect_hr));
++        hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++        ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
++        ID2D1Effect_GetOutput(effect, &output);
++
++        ID2D1DeviceContext_BeginDraw(context);
++        ID2D1DeviceContext_Clear(context, NULL);
++        ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, D2D1_INTERPOLATION_MODE_LINEAR,
++                D2D1_COMPOSITE_MODE_SOURCE_OVER);
++        hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++        if (tests[i].filter)
++        {
++            todo_wine ok(filter_effect_hr[0] == E_INVALIDARG, "Got unexpected hr %#lx for input 1.\n",
++                    filter_effect_hr[0]);
++            todo_wine ok(filter_effect_hr[1] == E_INVALIDARG, "Got unexpected hr %#lx for filter 0x2.\n",
++                    filter_effect_hr[1]);
++            ok(filter_effect_hr[2] == S_OK, "Got unexpected hr %#lx.\n", filter_effect_hr[2]);
++        }
++
++        get_surface_readback(&ctx, &rb);
++        colour = get_readback_colour(&rb, 0, 0);
++        todo_wine_if(tests[i].colour == 0xffff0000)
++        ok(compare_colour(colour, tests[i].colour, 2), "Got unexpected colour 0x%08lx.\n", colour);
++        release_resource_readback(&rb);
++
++        ID2D1Image_Release(output);
++        ID2D1Effect_Release(effect);
++        winetest_pop_context();
++    }
++
++    filter_effect_filter = NULL;
++    ID2D1Bitmap1_Release(bitmap);
 +    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    release_test_context(&ctx);
@@ -9750,7 +9932,7 @@ index 94aa4586184..a88e0b15622 100644
      release_test_context(&ctx);
  }
  
-@@ -18357,6 +24880,12 @@ START_TEST(d2d1)
+@@ -18357,6 +25062,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -9763,7 +9945,7 @@ index 94aa4586184..a88e0b15622 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +24909,7 @@ START_TEST(d2d1)
+@@ -18380,6 +25091,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -9771,7 +9953,7 @@ index 94aa4586184..a88e0b15622 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18397,8 +24927,12 @@ START_TEST(d2d1)
+@@ -18397,8 +25109,12 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_scale);
      queue_d3d10_test(test_effect_premultiply);
      queue_d3d10_test(test_effect_3d_transform);
@@ -9784,7 +9966,7 @@ index 94aa4586184..a88e0b15622 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,10 +24942,35 @@ START_TEST(d2d1)
+@@ -18408,10 +25124,36 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
@@ -9810,6 +9992,7 @@ index 94aa4586184..a88e0b15622 100644
 +    queue_test(test_effect_command_list_input);
 +    queue_test(test_effect_scaled_draw);
 +    queue_d3d10_test(test_effect_prepare_for_render_draw_transform);
++    queue_d3d10_test(test_effect_input_filter);
      queue_d3d10_test(test_get_effect_properties);
      queue_test(test_effect_vertex_buffer);
      queue_d3d10_test(test_compute_geometry_area);
