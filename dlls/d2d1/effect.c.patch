@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..7e7d3314546 100644
+index c298aeca93d..7a302ccdaa8 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -870,46 +870,57 @@ index c298aeca93d..7e7d3314546 100644
      </Inputs>                                                                \
      <Property name='InterpolationMode' type='enum' />                        \
      <Property name='BorderMode' type='enum' />                               \
-@@ -1262,90 +1744,800 @@ L"<?xml version='1.0'?>                                                   \
-     <Property name='BorderMode' type='enum' />                            \
-   </Effect>";
+@@ -1277,645 +1759,2219 @@ static const D2D1_PROPERTY_BINDING crop_bindings[] =
+     { L"BorderMode", BINDING_RW(crop, border_mode) },
+ };
  
--struct crop_properties
-+struct crop_properties
-+{
-+    D2D1_VECTOR_4F rect;
-+    D2D1_BORDER_MODE border_mode;
-+};
-+
-+EFFECT_PROPERTY_RW(crop, rect, VECTOR4)
-+EFFECT_PROPERTY_RW(crop, border_mode, ENUM)
-+
-+static const D2D1_PROPERTY_BINDING crop_bindings[] =
-+{
-+    { L"Rect", BINDING_RW(crop, rect) },
-+    { L"BorderMode", BINDING_RW(crop, border_mode) },
-+};
-+
+-static HRESULT __stdcall crop_factory(IUnknown **effect)
 +
 +/* Crop changes the region rather than the pixels, so it needs no shader --
 + * only a rect mapping. The properties live in the implementation object's
 + * trailing block and are read on each call, so a later SetValue() is picked
 + * up without rebuilding anything. */
 +struct d2d_crop_transform
-+{
+ {
+-    static const struct crop_properties properties =
+-    {
+-        .rect = { -INFINITY, -INFINITY, INFINITY, INFINITY },
+-        .border_mode = D2D1_BORDER_MODE_SOFT,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+-}
 +    ID2D1Transform ID2D1Transform_iface;
 +    LONG refcount;
 +    struct d2d_effect_impl *impl;
 +};
-+
+ 
+-static const WCHAR shadow_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Shadow'/>           \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Shadow'/>           \
+-    <Inputs >                                                             \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-    <Property name='BlurStandardDeviation' type='float' />                \
+-    <Property name='Color' type='vector4' />                              \
+-    <Property name='Optimization' type='enum' />                          \
+-  </Effect>";
 +static inline struct d2d_crop_transform *impl_from_crop_ID2D1Transform(ID2D1Transform *iface)
 +{
 +    return CONTAINING_RECORD(iface, struct d2d_crop_transform, ID2D1Transform_iface);
 +}
-+
+ 
+-struct shadow_properties
 +static HRESULT STDMETHODCALLTYPE d2d_crop_transform_QueryInterface(ID2D1Transform *iface,
 +        REFIID iid, void **out)
-+{
+ {
+-    float blur_standard_deviation;
+-    D2D_VECTOR_4F color;
+-    D2D1_SHADOW_OPTIMIZATION optimization;
+-};
 +    if (IsEqualGUID(iid, &IID_ID2D1Transform)
 +            || IsEqualGUID(iid, &IID_ID2D1TransformNode)
 +            || IsEqualGUID(iid, &IID_IUnknown))
@@ -918,19 +929,35 @@ index c298aeca93d..7e7d3314546 100644
 +        ID2D1Transform_AddRef(iface);
 +        return S_OK;
 +    }
-+
+ 
+-EFFECT_PROPERTY_RW(shadow, blur_standard_deviation, FLOAT)
+-EFFECT_PROPERTY_RW(shadow, color, VECTOR4)
+-EFFECT_PROPERTY_RW(shadow, optimization, ENUM)
 +    WARN("Unsupported interface %s.\n", debugstr_guid(iid));
 +    *out = NULL;
 +    return E_NOINTERFACE;
 +}
-+
+ 
+-static const D2D1_PROPERTY_BINDING shadow_bindings[] =
 +static ULONG STDMETHODCALLTYPE d2d_crop_transform_AddRef(ID2D1Transform *iface)
-+{
+ {
+-    { L"BlurStandardDeviation", BINDING_RW(shadow, blur_standard_deviation) },
+-    { L"Color", BINDING_RW(shadow, color) },
+-    { L"Optimization", BINDING_RW(shadow, optimization) },
+-};
 +    return InterlockedIncrement(&impl_from_crop_ID2D1Transform(iface)->refcount);
 +}
-+
+ 
+-static HRESULT __stdcall shadow_factory(IUnknown **effect)
 +static ULONG STDMETHODCALLTYPE d2d_crop_transform_Release(ID2D1Transform *iface)
-+{
+ {
+-    static const struct shadow_properties properties =
+-    {
+-        .blur_standard_deviation = 3.0f,
+-        .color = { 0.0f, 0.0f, 0.0f, 1.0f },
+-        .optimization = D2D1_SHADOW_OPTIMIZATION_BALANCED,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
 +    struct d2d_crop_transform *transform = impl_from_crop_ID2D1Transform(iface);
 +    ULONG refcount = InterlockedDecrement(&transform->refcount);
 +
@@ -938,17 +965,30 @@ index c298aeca93d..7e7d3314546 100644
 +        free(transform);
 +
 +    return refcount;
-+}
-+
+ }
+ 
+-static const WCHAR grayscale_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Grayscale'/>        \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Grayscale'/>        \
+-    <Inputs >                                                             \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-  </Effect>";
 +static UINT32 STDMETHODCALLTYPE d2d_crop_transform_GetInputCount(ID2D1Transform *iface)
 +{
 +    return 1;
 +}
-+
+ 
+-static HRESULT __stdcall grayscale_factory(IUnknown **effect)
 +/* The rect is in DIPs and may be infinite in any direction, so clamp rather
 + * than convert directly: converting an infinity to LONG is undefined. */
 +static void d2d_crop_transform_get_rect(struct d2d_crop_transform *transform, D2D1_RECT_L *rect)
-+{
+ {
+-    return d2d_effect_create_impl(effect, NULL, 0);
 +    const struct crop_properties *props = (const struct crop_properties *)(transform->impl + 1);
 +
 +    rect->left = props->rect.x <= (float)LONG_MIN ? LONG_MIN :
@@ -959,14 +999,29 @@ index c298aeca93d..7e7d3314546 100644
 +            props->rect.z >= (float)LONG_MAX ? LONG_MAX : (LONG)ceilf(props->rect.z);
 +    rect->bottom = props->rect.w <= (float)LONG_MIN ? LONG_MIN :
 +            props->rect.w >= (float)LONG_MAX ? LONG_MAX : (LONG)ceilf(props->rect.w);
-+}
-+
+ }
+ 
+-static const WCHAR color_matrix_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Color Matrix'/>     \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Color Matrix'/>     \
+-    <Inputs >                                                             \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-    <Property name='ColorMatrix' type='matrix5x4' />                      \
+-    <Property name='AlphaMode' type='enum' />                             \
+-    <Property name='ClampOutput' type='bool' />                           \
+-  </Effect>";
 +static HRESULT STDMETHODCALLTYPE d2d_crop_transform_MapOutputRectToInputRects(ID2D1Transform *iface,
 +        const D2D1_RECT_L *output_rect, D2D1_RECT_L *input_rects, UINT32 input_rect_count)
 +{
 +    if (input_rect_count != 1)
 +        return E_INVALIDARG;
-+
+ 
+-struct color_matrix_properties
 +    input_rects[0] = *output_rect;
 +
 +    return S_OK;
@@ -975,7 +1030,10 @@ index c298aeca93d..7e7d3314546 100644
 +static HRESULT STDMETHODCALLTYPE d2d_crop_transform_MapInputRectsToOutputRect(ID2D1Transform *iface,
 +        const D2D1_RECT_L *input_rects, const D2D1_RECT_L *input_opaque_subrects,
 +        UINT32 input_rect_count, D2D1_RECT_L *output_rect, D2D1_RECT_L *output_opaque_subrect)
-+{
+ {
+-    D2D1_MATRIX_5X4_F color_matrix;
+-    D2D1_COLORMATRIX_ALPHA_MODE alpha_mode;
+-    BOOL clamp_output;
 +    struct d2d_crop_transform *transform = impl_from_crop_ID2D1Transform(iface);
 +    D2D1_RECT_L crop;
 +
@@ -1019,14 +1077,18 @@ index c298aeca93d..7e7d3314546 100644
 +    d2d_crop_transform_MapOutputRectToInputRects,
 +    d2d_crop_transform_MapInputRectsToOutputRect,
 +    d2d_crop_transform_MapInvalidRect,
-+};
-+
+ };
+ 
+-EFFECT_PROPERTY_RW(color_matrix, color_matrix, MATRIX_5X4)
+-EFFECT_PROPERTY_RW(color_matrix, alpha_mode, ENUM)
+-EFFECT_PROPERTY_RW(color_matrix, clamp_output, BOOL)
 +static HRESULT STDMETHODCALLTYPE d2d_crop_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
 +{
 +    struct d2d_crop_transform *transform;
 +    HRESULT hr;
-+
+ 
+-static const D2D1_PROPERTY_BINDING color_matrix_bindings[] =
 +    if (!(transform = calloc(1, sizeof(*transform))))
 +        return E_OUTOFMEMORY;
 +
@@ -1044,86 +1106,120 @@ index c298aeca93d..7e7d3314546 100644
 +}
 +
 +static const ID2D1EffectImplVtbl d2d_crop_impl_vtbl =
-+{
+ {
+-    { L"ColorMatrix", BINDING_RW(color_matrix, color_matrix) },
+-    { L"AlphaMode", BINDING_RW(color_matrix, alpha_mode) },
+-    { L"ClampOutput", BINDING_RW(color_matrix, clamp_output) },
 +    d2d_effect_impl_QueryInterface,
 +    d2d_effect_impl_AddRef,
 +    d2d_effect_impl_Release,
 +    d2d_crop_impl_Initialize,
 +    d2d_effect_impl_PrepareForRender,
 +    d2d_effect_impl_SetGraph,
-+};
-+
+ };
+ 
+-static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
 +static HRESULT __stdcall crop_factory(IUnknown **effect)
-+{
+ {
+-    static const struct color_matrix_properties properties =
 +    static const struct crop_properties properties =
-+    {
+     {
+-        .color_matrix = { ._11 = 1.0f, ._22 = 1.0f, ._33 = 1.0f, ._44 = 1.0f },
+-        .alpha_mode = D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED,
 +        .rect = { -INFINITY, -INFINITY, INFINITY, INFINITY },
 +        .border_mode = D2D1_BORDER_MODE_SOFT,
-+    };
+     };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_crop_impl_vtbl, &properties, sizeof(properties));
-+}
-+
+ }
+ 
+-static const WCHAR flood_description[] =
 +static const WCHAR shadow_description[] =
-+L"<?xml version='1.0'?>                                                   \
-+  <Effect>                                                                \
+ L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Flood'/>            \
 +    <Property name='DisplayName' type='string' value='Shadow'/>           \
-+    <Property name='Author'      type='string' value='The Wine Project'/> \
-+    <Property name='Category'    type='string' value='Stub'/>             \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Flood'/>            \
+-    <Inputs minimum='0' maximum='0' >                                     \
 +    <Property name='Description' type='string' value='Shadow'/>           \
 +    <Inputs >                                                             \
 +      <Input name='Source'/>                                              \
-+    </Inputs>                                                             \
+     </Inputs>                                                             \
 +    <Property name='BlurStandardDeviation' type='float' />                \
-+    <Property name='Color' type='vector4' />                              \
+     <Property name='Color' type='vector4' />                              \
 +    <Property name='Optimization' type='enum' />                          \
-+  </Effect>";
-+
+   </Effect>";
+ 
+-struct flood_properties
 +struct shadow_properties
-+{
+ {
 +    float blur_standard_deviation;
-+    D2D_VECTOR_4F color;
+     D2D_VECTOR_4F color;
 +    D2D1_SHADOW_OPTIMIZATION optimization;
-+};
-+
+ };
+ 
+-EFFECT_PROPERTY_RW(flood, color, VECTOR4)
 +EFFECT_PROPERTY_RW(shadow, blur_standard_deviation, FLOAT)
 +EFFECT_PROPERTY_RW(shadow, color, VECTOR4)
 +EFFECT_PROPERTY_RW(shadow, optimization, ENUM)
-+
+ 
+-static const D2D1_PROPERTY_BINDING flood_bindings[] =
 +static const D2D1_PROPERTY_BINDING shadow_bindings[] =
-+{
+ {
+-    { L"Color", BINDING_RW(flood, color) },
 +    { L"BlurStandardDeviation", BINDING_RW(shadow, blur_standard_deviation) },
 +    { L"Color", BINDING_RW(shadow, color) },
 +    { L"Optimization", BINDING_RW(shadow, optimization) },
-+};
-+
+ };
+ 
+-static HRESULT __stdcall flood_factory(IUnknown **effect)
 +static HRESULT __stdcall shadow_factory(IUnknown **effect)
-+{
+ {
+-    static const struct flood_properties properties =
 +    static const struct shadow_properties properties =
-+    {
+     {
+-        .color = {0.0f, 0.0f, 0.0f, 1.0f},
 +        .blur_standard_deviation = 3.0f,
 +        .color = { 0.0f, 0.0f, 0.0f, 1.0f },
 +        .optimization = D2D1_SHADOW_OPTIMIZATION_BALANCED,
-+    };
-+    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
-+}
-+
+     };
+     return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+ }
+ 
+-static const WCHAR gaussian_blur_description[] =
 +static const WCHAR grayscale_description[] =
-+L"<?xml version='1.0'?>                                                   \
-+  <Effect>                                                                \
+ L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Gaussian Blur'/>    \
 +    <Property name='DisplayName' type='string' value='Grayscale'/>        \
-+    <Property name='Author'      type='string' value='The Wine Project'/> \
-+    <Property name='Category'    type='string' value='Stub'/>             \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Gaussian Blur'/>    \
+-    <Inputs>                                                              \
 +    <Property name='Description' type='string' value='Grayscale'/>        \
 +    <Inputs >                                                             \
-+      <Input name='Source'/>                                              \
-+    </Inputs>                                                             \
-+  </Effect>";
-+
+       <Input name='Source'/>                                              \
+     </Inputs>                                                             \
+-    <Property name='StandardDeviation' type='float' />                    \
+-    <Property name='Optimization' type='enum' />                          \
+-    <Property name='BorderMode' type='enum' />                            \
+   </Effect>";
+ 
+-struct gaussian_blur_properties
 +static HRESULT __stdcall grayscale_factory(IUnknown **effect)
-+{
+ {
+-    float standard_deviation;
+-    D2D1_GAUSSIANBLUR_OPTIMIZATION optimization;
+-    D2D1_BORDER_MODE border_mode;
+-};
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_grayscale_impl_vtbl, NULL, 0);
 +}
-+
+ 
+-EFFECT_PROPERTY_RW(gaussian_blur, standard_deviation, FLOAT)
+-EFFECT_PROPERTY_RW(gaussian_blur, optimization, ENUM)
+-EFFECT_PROPERTY_RW(gaussian_blur, border_mode, ENUM)
 +static const WCHAR premultiply_description[] =
 +L"<?xml version='1.0'?>                                                   \
 +  <Effect>                                                                \
@@ -1135,7 +1231,8 @@ index c298aeca93d..7e7d3314546 100644
 +      <Input name='Source'/>                                              \
 +    </Inputs>                                                             \
 +  </Effect>";
-+
+ 
+-static const D2D1_PROPERTY_BINDING gaussian_blur_bindings[] =
 +static const char premultiply_ps[] =
 +    "Texture2D InputTexture : register(t0);\n"
 +    "SamplerState InputSampler : register(s0);\n"
@@ -1152,7 +1249,10 @@ index c298aeca93d..7e7d3314546 100644
 +
 +static HRESULT STDMETHODCALLTYPE d2d_premultiply_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
-+{
+ {
+-    { L"StandardDeviation", BINDING_RW(gaussian_blur, standard_deviation) },
+-    { L"Optimization", BINDING_RW(gaussian_blur, optimization) },
+-    { L"BorderMode", BINDING_RW(gaussian_blur, border_mode) },
 +    return d2d_builtin_effect_init_full(iface, context, graph,
 +            &GUID_d2d_premultiply_ps, premultiply_ps, 1, 0);
 +}
@@ -1165,25 +1265,45 @@ index c298aeca93d..7e7d3314546 100644
 +    d2d_premultiply_impl_Initialize,
 +    d2d_effect_impl_PrepareForRender,
 +    d2d_effect_impl_SetGraph,
-+};
-+
+ };
+ 
+-static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
 +static HRESULT __stdcall premultiply_factory(IUnknown **effect)
-+{
+ {
+-    static const struct gaussian_blur_properties properties =
+-    {
+-        .standard_deviation = 3.0f,
+-        .optimization = D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED,
+-        .border_mode = D2D1_BORDER_MODE_SOFT,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_premultiply_impl_vtbl, NULL, 0);
-+}
-+
+ }
+ 
+-static const WCHAR point_specular_description[] =
 +static const WCHAR unpremultiply_description[] =
-+L"<?xml version='1.0'?>                                                   \
-+  <Effect>                                                                \
+ L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Point Specular'/>   \
 +    <Property name='DisplayName' type='string' value='UnPremultiply'/>    \
-+    <Property name='Author'      type='string' value='The Wine Project'/> \
-+    <Property name='Category'    type='string' value='Stub'/>             \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Point Specular'/>   \
+-    <Inputs>                                                              \
 +    <Property name='Description' type='string' value='UnPremultiply'/>    \
 +    <Inputs >                                                             \
-+      <Input name='Source'/>                                              \
-+    </Inputs>                                                             \
-+  </Effect>";
-+
+       <Input name='Source'/>                                              \
+     </Inputs>                                                             \
+-    <Property name='LightPosition' type='vector3' />                      \
+-    <Property name='SpecularExponent' type='float' />                     \
+-    <Property name='SpecularConstant' type='float' />                     \
+-    <Property name='SurfaceScale' type='float' />                         \
+-    <Property name='Color' type='vector3' />                              \
+-    <Property name='KernelUnitLength' type='vector2' />                   \
+-    <Property name='ScaleMode' type='enum' />                             \
+   </Effect>";
+ 
+-struct point_specular_properties
 +/* Undoing premultiplication is only defined where there is alpha to divide
 + * by; a fully transparent pixel keeps its colour rather than exploding. */
 +static const char unpremultiply_ps[] =
@@ -1204,51 +1324,103 @@ index c298aeca93d..7e7d3314546 100644
 +
 +static HRESULT STDMETHODCALLTYPE d2d_unpremultiply_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
-+{
+ {
+-    D2D_VECTOR_3F light_position;
+-    float specular_exponent;
+-    float specular_constant;
+-    float surface_scale;
+-    D2D_VECTOR_3F color;
+-    D2D_VECTOR_2F kernel_unit_length;
+-    D2D1_POINTSPECULAR_SCALE_MODE scale_mode;
+-};
+-
+-EFFECT_PROPERTY_RW(point_specular, light_position, VECTOR3)
+-EFFECT_PROPERTY_RW(point_specular, specular_exponent, FLOAT)
+-EFFECT_PROPERTY_RW(point_specular, specular_constant, FLOAT)
+-EFFECT_PROPERTY_RW(point_specular, surface_scale, FLOAT)
+-EFFECT_PROPERTY_RW(point_specular, color, VECTOR3)
+-EFFECT_PROPERTY_RW(point_specular, kernel_unit_length, VECTOR2)
+-EFFECT_PROPERTY_RW(point_specular, scale_mode, ENUM)
 +    return d2d_builtin_effect_init_full(iface, context, graph,
 +            &GUID_d2d_unpremultiply_ps, unpremultiply_ps, 1, 0);
 +}
-+
+ 
+-static const D2D1_PROPERTY_BINDING point_specular_bindings[] =
 +static const ID2D1EffectImplVtbl d2d_unpremultiply_impl_vtbl =
-+{
+ {
+-    { L"LightPosition", BINDING_RW(point_specular, light_position) },
+-    { L"SpecularExponent", BINDING_RW(point_specular, specular_exponent) },
+-    { L"SpecularConstant", BINDING_RW(point_specular, specular_constant) },
+-    { L"SurfaceScale", BINDING_RW(point_specular, surface_scale) },
+-    { L"Color", BINDING_RW(point_specular, color) },
+-    { L"KernelUnitLength", BINDING_RW(point_specular, kernel_unit_length) },
+-    { L"ScaleMode", BINDING_RW(point_specular, scale_mode) },
 +    d2d_effect_impl_QueryInterface,
 +    d2d_effect_impl_AddRef,
 +    d2d_effect_impl_Release,
 +    d2d_unpremultiply_impl_Initialize,
 +    d2d_effect_impl_PrepareForRender,
 +    d2d_effect_impl_SetGraph,
-+};
-+
+ };
+ 
+-static HRESULT __stdcall point_specular_factory(IUnknown **effect)
 +static HRESULT __stdcall unpremultiply_factory(IUnknown **effect)
-+{
+ {
+-    static const struct point_specular_properties properties =
+-    {
+-        .specular_exponent = 1.0f,
+-        .specular_constant = 1.0f,
+-        .surface_scale = 1.0f,
+-        .color = { 1.0f, 1.0f, 1.0f },
+-        .kernel_unit_length = { 1.0f, 1.0f },
+-        .scale_mode = D2D1_POINTSPECULAR_SCALE_MODE_LINEAR,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_unpremultiply_impl_vtbl, NULL, 0);
-+}
-+
+ }
+ 
+-static const WCHAR arithmetic_composite_description[] =
 +static const WCHAR opacity_description[] =
-+L"<?xml version='1.0'?>                                                   \
-+  <Effect>                                                                \
+ L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Arithmetic Composite'/> \
 +    <Property name='DisplayName' type='string' value='Opacity'/>          \
-+    <Property name='Author'      type='string' value='The Wine Project'/> \
-+    <Property name='Category'    type='string' value='Stub'/>             \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Arithmetic Composite'/> \
+-    <Inputs minimum='2' maximum='2' >                                     \
+-      <Input name='Source1'/>                                             \
+-      <Input name='Source2'/>                                             \
 +    <Property name='Description' type='string' value='Opacity'/>          \
 +    <Inputs >                                                             \
 +      <Input name='Source'/>                                              \
-+    </Inputs>                                                             \
+     </Inputs>                                                             \
+-    <Property name='Coefficients' type='vector4' />                       \
+-    <Property name='ClampOutput' type='bool' />                           \
 +    <Property name='Opacity' type='float' />                              \
-+  </Effect>";
-+
+   </Effect>";
+ 
+-struct arithmetic_composite_properties
 +struct opacity_properties
-+{
+ {
+-    D2D_VECTOR_4F coefficients;
+-    BOOL clamp_output;
 +    float opacity;
-+};
-+
+ };
+ 
+-EFFECT_PROPERTY_RW(arithmetic_composite, coefficients, VECTOR4)
+-EFFECT_PROPERTY_RW(arithmetic_composite, clamp_output, BOOL)
 +EFFECT_PROPERTY_RW(opacity, opacity, FLOAT)
-+
+ 
+-static const D2D1_PROPERTY_BINDING arithmetic_composite_bindings[] =
 +static const D2D1_PROPERTY_BINDING opacity_bindings[] =
-+{
+ {
+-    { L"Coefficients", BINDING_RW(arithmetic_composite, coefficients) },
+-    { L"ClampOutput", BINDING_RW(arithmetic_composite, clamp_output) },
 +    { L"Opacity", BINDING_RW(opacity, opacity) },
-+};
-+
+ };
+ 
+-static HRESULT __stdcall arithmetic_composite_factory(IUnknown **effect)
 +/* Colour is premultiplied, so scaling every channel scales the coverage
 + * along with it. */
 +static const char opacity_ps[] =
@@ -1270,7 +1442,12 @@ index c298aeca93d..7e7d3314546 100644
 +
 +static HRESULT STDMETHODCALLTYPE d2d_opacity_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
-+{
+ {
+-    static const struct arithmetic_composite_properties properties =
+-    {
+-        .coefficients = { 1.0f, 0.0f, 0.0f, 0.0f },
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
 +    return d2d_builtin_effect_init_full(iface, context, graph, &GUID_d2d_opacity_ps,
 +            opacity_ps, 1, sizeof(struct opacity_properties));
 +}
@@ -1532,14 +1709,10 @@ index c298aeca93d..7e7d3314546 100644
 +EFFECT_PROPERTY_RW(opacity_metadata, input_opaque_rect, VECTOR4)
 +
 +static const D2D1_PROPERTY_BINDING opacity_metadata_bindings[] =
- {
--    D2D1_VECTOR_4F rect;
--    D2D1_BORDER_MODE border_mode;
++{
 +    { L"InputOpaqueRect", BINDING_RW(opacity_metadata, input_opaque_rect) },
- };
- 
--EFFECT_PROPERTY_RW(crop, rect, VECTOR4)
--EFFECT_PROPERTY_RW(crop, border_mode, ENUM)
++};
++
 +/* The effect only declares which part of its input is opaque, so that later
 + * stages can skip blending there. It does not change any pixel, and nothing
 + * here acts on the hint yet. */
@@ -1562,82 +1735,56 @@ index c298aeca93d..7e7d3314546 100644
 +    return d2d_builtin_effect_init_full(iface, context, graph, &GUID_d2d_opacity_metadata_ps,
 +            opacity_metadata_ps, 1, 0);
 +}
- 
--static const D2D1_PROPERTY_BINDING crop_bindings[] =
++
 +static const ID2D1EffectImplVtbl d2d_opacity_metadata_impl_vtbl =
- {
--    { L"Rect", BINDING_RW(crop, rect) },
--    { L"BorderMode", BINDING_RW(crop, border_mode) },
++{
 +    d2d_effect_impl_QueryInterface,
 +    d2d_effect_impl_AddRef,
 +    d2d_effect_impl_Release,
 +    d2d_opacity_metadata_impl_Initialize,
 +    d2d_effect_impl_PrepareForRender,
 +    d2d_effect_impl_SetGraph,
- };
- 
--static HRESULT __stdcall crop_factory(IUnknown **effect)
++};
++
 +static HRESULT __stdcall opacity_metadata_factory(IUnknown **effect)
- {
--    static const struct crop_properties properties =
++{
 +    static const struct opacity_metadata_properties properties =
-     {
--        .rect = { -INFINITY, -INFINITY, INFINITY, INFINITY },
--        .border_mode = D2D1_BORDER_MODE_SOFT,
++    {
 +        .input_opaque_rect = { 0.0f, 0.0f, 0.0f, 0.0f },
-     };
--    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++    };
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_opacity_metadata_impl_vtbl,
 +            &properties, sizeof(properties));
- }
- 
--static const WCHAR shadow_description[] =
++}
++
 +static const WCHAR emboss_description[] =
- L"<?xml version='1.0'?>                                                   \
-   <Effect>                                                                \
--    <Property name='DisplayName' type='string' value='Shadow'/>           \
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
 +    <Property name='DisplayName' type='string' value='Emboss'/>           \
-     <Property name='Author'      type='string' value='The Wine Project'/> \
-     <Property name='Category'    type='string' value='Stub'/>             \
--    <Property name='Description' type='string' value='Shadow'/>           \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
 +    <Property name='Description' type='string' value='Emboss'/>           \
-     <Inputs >                                                             \
-       <Input name='Source'/>                                              \
-     </Inputs>                                                             \
--    <Property name='BlurStandardDeviation' type='float' />                \
--    <Property name='Color' type='vector4' />                              \
--    <Property name='Optimization' type='enum' />                          \
++    <Inputs >                                                             \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
 +    <Property name='Height'    type='float' />                            \
 +    <Property name='Direction' type='float' />                            \
-   </Effect>";
- 
--struct shadow_properties
++  </Effect>";
++
 +struct emboss_properties
- {
--    float blur_standard_deviation;
--    D2D_VECTOR_4F color;
--    D2D1_SHADOW_OPTIMIZATION optimization;
++{
 +    float height;
 +    float direction;
- };
- 
--EFFECT_PROPERTY_RW(shadow, blur_standard_deviation, FLOAT)
--EFFECT_PROPERTY_RW(shadow, color, VECTOR4)
--EFFECT_PROPERTY_RW(shadow, optimization, ENUM)
++};
++
 +EFFECT_PROPERTY_RW(emboss, height, FLOAT)
 +EFFECT_PROPERTY_RW(emboss, direction, FLOAT)
- 
--static const D2D1_PROPERTY_BINDING shadow_bindings[] =
++
 +static const D2D1_PROPERTY_BINDING emboss_bindings[] =
- {
--    { L"BlurStandardDeviation", BINDING_RW(shadow, blur_standard_deviation) },
--    { L"Color", BINDING_RW(shadow, color) },
--    { L"Optimization", BINDING_RW(shadow, optimization) },
++{
 +    { L"Height", BINDING_RW(emboss, height) },
 +    { L"Direction", BINDING_RW(emboss, direction) },
- };
- 
--static HRESULT __stdcall shadow_factory(IUnknown **effect)
++};
++
 +/* Emboss lights the image from one direction: the difference between the
 + * pixel ahead and the pixel behind along that direction becomes a signed
 + * offset about mid grey. The step is taken in texels, which the shader gets
@@ -1676,29 +1823,11 @@ index c298aeca93d..7e7d3314546 100644
 +
 +static HRESULT STDMETHODCALLTYPE d2d_emboss_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
- {
--    static const struct shadow_properties properties =
--    {
--        .blur_standard_deviation = 3.0f,
--        .color = { 0.0f, 0.0f, 0.0f, 1.0f },
--        .optimization = D2D1_SHADOW_OPTIMIZATION_BALANCED,
--    };
--    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++{
 +    return d2d_builtin_effect_init_full(iface, context, graph, &GUID_d2d_emboss_ps,
 +            emboss_ps, 1, sizeof(struct emboss_properties));
- }
- 
--static const WCHAR grayscale_description[] =
--L"<?xml version='1.0'?>                                                   \
--  <Effect>                                                                \
--    <Property name='DisplayName' type='string' value='Grayscale'/>        \
--    <Property name='Author'      type='string' value='The Wine Project'/> \
--    <Property name='Category'    type='string' value='Stub'/>             \
--    <Property name='Description' type='string' value='Grayscale'/>        \
--    <Inputs >                                                             \
--      <Input name='Source'/>                                              \
--    </Inputs>                                                             \
--  </Effect>";
++}
++
 +static const ID2D1EffectImplVtbl d2d_emboss_impl_vtbl =
 +{
 +    d2d_effect_impl_QueryInterface,
@@ -1708,24 +1837,50 @@ index c298aeca93d..7e7d3314546 100644
 +    d2d_effect_impl_PrepareForRender,
 +    d2d_effect_impl_SetGraph,
 +};
- 
--static HRESULT __stdcall grayscale_factory(IUnknown **effect)
++
 +static HRESULT __stdcall emboss_factory(IUnknown **effect)
- {
--    return d2d_effect_create_impl(effect, NULL, 0);
++{
 +    static const struct emboss_properties properties =
 +    {
 +        .height = 1.0f,
 +        .direction = 0.0f,
 +    };
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_emboss_impl_vtbl, &properties, sizeof(properties));
- }
- 
- static const WCHAR color_matrix_description[] =
-@@ -1381,6 +2573,54 @@ static const D2D1_PROPERTY_BINDING color_matrix_bindings[] =
-     { L"ClampOutput", BINDING_RW(color_matrix, clamp_output) },
- };
- 
++}
++
++static const WCHAR color_matrix_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Color Matrix'/>     \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Color Matrix'/>     \
++    <Inputs >                                                             \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='ColorMatrix' type='matrix5x4' />                      \
++    <Property name='AlphaMode' type='enum' />                             \
++    <Property name='ClampOutput' type='bool' />                           \
++  </Effect>";
++
++struct color_matrix_properties
++{
++    D2D1_MATRIX_5X4_F color_matrix;
++    D2D1_COLORMATRIX_ALPHA_MODE alpha_mode;
++    BOOL clamp_output;
++};
++
++EFFECT_PROPERTY_RW(color_matrix, color_matrix, MATRIX_5X4)
++EFFECT_PROPERTY_RW(color_matrix, alpha_mode, ENUM)
++EFFECT_PROPERTY_RW(color_matrix, clamp_output, BOOL)
++
++static const D2D1_PROPERTY_BINDING color_matrix_bindings[] =
++{
++    { L"ColorMatrix", BINDING_RW(color_matrix, color_matrix) },
++    { L"AlphaMode", BINDING_RW(color_matrix, alpha_mode) },
++    { L"ClampOutput", BINDING_RW(color_matrix, clamp_output) },
++};
++
 +/* Colour is a row vector multiplied by the first four rows, with the fifth
 + * row added. In premultiplied mode the matrix applies to unpremultiplied
 + * colour, which is premultiplied again by the alpha it produces. */
@@ -1774,14 +1929,13 @@ index c298aeca93d..7e7d3314546 100644
 +    d2d_effect_impl_SetGraph,
 +};
 +
- static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
- {
-     static const struct color_matrix_properties properties =
-@@ -1388,7 +2628,58 @@ static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
-         .color_matrix = { ._11 = 1.0f, ._22 = 1.0f, ._33 = 1.0f, ._44 = 1.0f },
-         .alpha_mode = D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED,
-     };
--    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
++{
++    static const struct color_matrix_properties properties =
++    {
++        .color_matrix = { ._11 = 1.0f, ._22 = 1.0f, ._33 = 1.0f, ._44 = 1.0f },
++        .alpha_mode = D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED,
++    };
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_color_matrix_impl_vtbl, &properties, sizeof(properties));
 +}
 +
@@ -1834,13 +1988,32 @@ index c298aeca93d..7e7d3314546 100644
 +static HRESULT __stdcall invert_factory(IUnknown **effect)
 +{
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_invert_impl_vtbl, NULL, 0);
- }
- 
- static const WCHAR flood_description[] =
-@@ -1415,13 +2706,48 @@ static const D2D1_PROPERTY_BINDING flood_bindings[] =
-     { L"Color", BINDING_RW(flood, color) },
- };
- 
++}
++
++static const WCHAR flood_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Flood'/>            \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Flood'/>            \
++    <Inputs minimum='0' maximum='0' >                                     \
++    </Inputs>                                                             \
++    <Property name='Color' type='vector4' />                              \
++  </Effect>";
++
++struct flood_properties
++{
++    D2D_VECTOR_4F color;
++};
++
++EFFECT_PROPERTY_RW(flood, color, VECTOR4)
++
++static const D2D1_PROPERTY_BINDING flood_bindings[] =
++{
++    { L"Color", BINDING_RW(flood, color) },
++};
++
 +/* "Fills the output with the given color." The output has no inputs and is
 + * unbounded; the colour property is straight alpha, and the output image is
 + * premultiplied. */
@@ -1876,21 +2049,48 @@ index c298aeca93d..7e7d3314546 100644
 +    d2d_effect_impl_SetGraph,
 +};
 +
- static HRESULT __stdcall flood_factory(IUnknown **effect)
- {
-     static const struct flood_properties properties =
-     {
-         .color = {0.0f, 0.0f, 0.0f, 1.0f},
-     };
--    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++static HRESULT __stdcall flood_factory(IUnknown **effect)
++{
++    static const struct flood_properties properties =
++    {
++        .color = {0.0f, 0.0f, 0.0f, 1.0f},
++    };
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_flood_impl_vtbl, &properties, sizeof(properties));
- }
- 
- static const WCHAR gaussian_blur_description[] =
-@@ -1457,6 +2783,28 @@ static const D2D1_PROPERTY_BINDING gaussian_blur_bindings[] =
-     { L"BorderMode", BINDING_RW(gaussian_blur, border_mode) },
- };
- 
++}
++
++static const WCHAR gaussian_blur_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Gaussian Blur'/>    \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Gaussian Blur'/>    \
++    <Inputs>                                                              \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='StandardDeviation' type='float' />                    \
++    <Property name='Optimization' type='enum' />                          \
++    <Property name='BorderMode' type='enum' />                            \
++  </Effect>";
++
++struct gaussian_blur_properties
++{
++    float standard_deviation;
++    D2D1_GAUSSIANBLUR_OPTIMIZATION optimization;
++    D2D1_BORDER_MODE border_mode;
++};
++
++EFFECT_PROPERTY_RW(gaussian_blur, standard_deviation, FLOAT)
++EFFECT_PROPERTY_RW(gaussian_blur, optimization, ENUM)
++EFFECT_PROPERTY_RW(gaussian_blur, border_mode, ENUM)
++
++static const D2D1_PROPERTY_BINDING gaussian_blur_bindings[] =
++{
++    { L"StandardDeviation", BINDING_RW(gaussian_blur, standard_deviation) },
++    { L"Optimization", BINDING_RW(gaussian_blur, optimization) },
++    { L"BorderMode", BINDING_RW(gaussian_blur, border_mode) },
++};
++
 +static HRESULT STDMETHODCALLTYPE d2d_gaussian_blur_impl_Initialize(ID2D1EffectImpl *iface,
 +        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
 +{
@@ -1913,13 +2113,14 @@ index c298aeca93d..7e7d3314546 100644
 +    d2d_effect_impl_SetGraph,
 +};
 +
- static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
- {
-     static const struct gaussian_blur_properties properties =
-@@ -1465,9 +2813,56 @@ static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
-         .optimization = D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED,
-         .border_mode = D2D1_BORDER_MODE_SOFT,
-     };
++static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
++{
++    static const struct gaussian_blur_properties properties =
++    {
++        .standard_deviation = 3.0f,
++        .optimization = D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED,
++        .border_mode = D2D1_BORDER_MODE_SOFT,
++    };
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_gaussian_blur_impl_vtbl,
 +            &properties, sizeof(properties));
 +}
@@ -1966,15 +2167,1175 @@ index c298aeca93d..7e7d3314546 100644
 +        .optimization = D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED,
 +        .border_mode = D2D1_BORDER_MODE_SOFT,
 +    };
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++
++static const WCHAR point_specular_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Point Specular'/>   \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Point Specular'/>   \
++    <Inputs>                                                              \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='LightPosition' type='vector3' />                      \
++    <Property name='SpecularExponent' type='float' />                     \
++    <Property name='SpecularConstant' type='float' />                     \
++    <Property name='SurfaceScale' type='float' />                         \
++    <Property name='Color' type='vector3' />                              \
++    <Property name='KernelUnitLength' type='vector2' />                   \
++    <Property name='ScaleMode' type='enum' />                             \
++  </Effect>";
++
++struct point_specular_properties
++{
++    D2D_VECTOR_3F light_position;
++    float specular_exponent;
++    float specular_constant;
++    float surface_scale;
++    D2D_VECTOR_3F color;
++    D2D_VECTOR_2F kernel_unit_length;
++    D2D1_POINTSPECULAR_SCALE_MODE scale_mode;
++};
++
++EFFECT_PROPERTY_RW(point_specular, light_position, VECTOR3)
++EFFECT_PROPERTY_RW(point_specular, specular_exponent, FLOAT)
++EFFECT_PROPERTY_RW(point_specular, specular_constant, FLOAT)
++EFFECT_PROPERTY_RW(point_specular, surface_scale, FLOAT)
++EFFECT_PROPERTY_RW(point_specular, color, VECTOR3)
++EFFECT_PROPERTY_RW(point_specular, kernel_unit_length, VECTOR2)
++EFFECT_PROPERTY_RW(point_specular, scale_mode, ENUM)
++
++static const D2D1_PROPERTY_BINDING point_specular_bindings[] =
++{
++    { L"LightPosition", BINDING_RW(point_specular, light_position) },
++    { L"SpecularExponent", BINDING_RW(point_specular, specular_exponent) },
++    { L"SpecularConstant", BINDING_RW(point_specular, specular_constant) },
++    { L"SurfaceScale", BINDING_RW(point_specular, surface_scale) },
++    { L"Color", BINDING_RW(point_specular, color) },
++    { L"KernelUnitLength", BINDING_RW(point_specular, kernel_unit_length) },
++    { L"ScaleMode", BINDING_RW(point_specular, scale_mode) },
++};
++
++static HRESULT __stdcall point_specular_factory(IUnknown **effect)
++{
++    static const struct point_specular_properties properties =
++    {
++        .specular_exponent = 1.0f,
++        .specular_constant = 1.0f,
++        .surface_scale = 1.0f,
++        .color = { 1.0f, 1.0f, 1.0f },
++        .kernel_unit_length = { 1.0f, 1.0f },
++        .scale_mode = D2D1_POINTSPECULAR_SCALE_MODE_LINEAR,
++    };
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++static const WCHAR arithmetic_composite_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Arithmetic Composite'/> \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Arithmetic Composite'/> \
++    <Inputs minimum='2' maximum='2' >                                     \
++      <Input name='Source1'/>                                             \
++      <Input name='Source2'/>                                             \
++    </Inputs>                                                             \
++    <Property name='Coefficients' type='vector4' />                       \
++    <Property name='ClampOutput' type='bool' />                           \
++  </Effect>";
++
++struct arithmetic_composite_properties
++{
++    D2D_VECTOR_4F coefficients;
++    BOOL clamp_output;
++};
++
++EFFECT_PROPERTY_RW(arithmetic_composite, coefficients, VECTOR4)
++EFFECT_PROPERTY_RW(arithmetic_composite, clamp_output, BOOL)
++
++static const D2D1_PROPERTY_BINDING arithmetic_composite_bindings[] =
++{
++    { L"Coefficients", BINDING_RW(arithmetic_composite, coefficients) },
++    { L"ClampOutput", BINDING_RW(arithmetic_composite, clamp_output) },
++};
++
++static HRESULT __stdcall arithmetic_composite_factory(IUnknown **effect)
++{
++    static const struct arithmetic_composite_properties properties =
++    {
++        .coefficients = { 1.0f, 0.0f, 0.0f, 0.0f },
++    };
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+ }
+ 
+ static const WCHAR blend_description[] =
+ L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Blend'/>            \
++    <Property name='DisplayName' type='string' value='Blend'/>            \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Blend'/>            \
++    <Inputs minimum='2' maximum='2' >                                     \
++      <Input name='Source1'/>                                             \
++      <Input name='Source2'/>                                             \
++    </Inputs>                                                             \
++    <Property name='Mode' type='enum' />                                  \
++  </Effect>";
++
++struct blend_properties
++{
++    D2D1_BLEND_MODE mode;
++};
++
++EFFECT_PROPERTY_RW(blend, mode, ENUM)
++
++static const D2D1_PROPERTY_BINDING blend_bindings[] =
++{
++    { L"Mode", BINDING_RW(blend, mode) },
++};
++
++static HRESULT __stdcall blend_factory(IUnknown **effect)
++{
++    static const struct blend_properties properties = {};
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++static const WCHAR brightness_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Brightness'/>       \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Brightness'/>       \
++    <Inputs>                                                              \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='WhitePoint' type='vector2' />                         \
++    <Property name='BlackPoint' type='vector2' />                         \
++  </Effect>";
++
++struct brightness_properties
++{
++    D2D_VECTOR_2F white_point;
++    D2D_VECTOR_2F black_point;
++};
++
++EFFECT_PROPERTY_RW(brightness, white_point, VECTOR2)
++EFFECT_PROPERTY_RW(brightness, black_point, VECTOR2)
++
++static const D2D1_PROPERTY_BINDING brightness_bindings[] =
++{
++    { L"WhitePoint", BINDING_RW(brightness, white_point) },
++    { L"BlackPoint", BINDING_RW(brightness, black_point) },
++};
++
++static HRESULT __stdcall brightness_factory(IUnknown **effect)
++{
++    static const struct brightness_properties properties =
++    {
++        .white_point = { 1.0f, 1.0f },
++    };
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++static const WCHAR directional_blur_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Directional Blur'/> \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Directional Blur'/> \
++    <Inputs>                                                              \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='StandardDeviation' type='float' />                    \
++    <Property name='Angle' type='float' />                                \
++    <Property name='Optimization' type='enum' />                          \
++    <Property name='BorderMode' type='enum' />                            \
++  </Effect>";
++
++struct directional_blur_properties
++{
++    float standard_deviation;
++    float angle;
++    D2D1_DIRECTIONALBLUR_OPTIMIZATION optimization;
++    D2D1_BORDER_MODE border_mode;
++};
++
++EFFECT_PROPERTY_RW(directional_blur, standard_deviation, FLOAT)
++EFFECT_PROPERTY_RW(directional_blur, angle, FLOAT)
++EFFECT_PROPERTY_RW(directional_blur, optimization, ENUM)
++EFFECT_PROPERTY_RW(directional_blur, border_mode, ENUM)
++
++static const D2D1_PROPERTY_BINDING directional_blur_bindings[] =
++{
++    { L"StandardDeviation", BINDING_RW(directional_blur, standard_deviation) },
++    { L"Angle", BINDING_RW(directional_blur, angle) },
++    { L"Optimization", BINDING_RW(directional_blur, optimization) },
++    { L"BorderMode", BINDING_RW(directional_blur, border_mode) },
++};
++
++static HRESULT __stdcall directional_blur_factory(IUnknown **effect)
++{
++    static const struct directional_blur_properties properties =
++    {
++        .standard_deviation = 3.0f,
++        .optimization = D2D1_DIRECTIONALBLUR_OPTIMIZATION_BALANCED,
++    };
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++static const WCHAR hue_rotation_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Hue Rotation'/>     \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Hue Rotation'/>     \
++    <Inputs>                                                              \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++    <Property name='Angle' type='float' />                                \
++  </Effect>";
++
++struct hue_rotation_properties
++{
++    float angle;
++};
++
++EFFECT_PROPERTY_RW(hue_rotation, angle, FLOAT)
++
++static const D2D1_PROPERTY_BINDING hue_rotation_bindings[] =
++{
++    { L"Angle", BINDING_RW(hue_rotation, angle) },
++};
++
++static HRESULT __stdcall hue_rotation_factory(IUnknown **effect)
++{
++    static const struct hue_rotation_properties properties = {};
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++static const WCHAR saturation_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Saturation'/>       \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Blend'/>            \
+-    <Inputs minimum='2' maximum='2' >                                     \
+-      <Input name='Source1'/>                                             \
+-      <Input name='Source2'/>                                             \
++    <Property name='Description' type='string' value='Saturation'/>       \
++    <Inputs>                                                              \
++      <Input name='Source'/>                                              \
+     </Inputs>                                                             \
+-    <Property name='Mode' type='enum' />                                  \
++    <Property name='Saturation' type='float' />                           \
+   </Effect>";
+ 
+-struct blend_properties
++struct saturation_properties
+ {
+-    D2D1_BLEND_MODE mode;
++    float saturation;
+ };
+ 
+-EFFECT_PROPERTY_RW(blend, mode, ENUM)
++EFFECT_PROPERTY_RW(saturation, saturation, FLOAT)
+ 
+-static const D2D1_PROPERTY_BINDING blend_bindings[] =
++static const D2D1_PROPERTY_BINDING saturation_bindings[] =
+ {
+-    { L"Mode", BINDING_RW(blend, mode) },
++    { L"Saturation", BINDING_RW(saturation, saturation) },
+ };
+ 
+-static HRESULT __stdcall blend_factory(IUnknown **effect)
++static HRESULT __stdcall saturation_factory(IUnknown **effect)
+ {
+-    static const struct blend_properties properties = {};
++    static const struct saturation_properties properties =
++    {
++        .saturation = 0.5f,
++    };
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
  }
  
-+
- static const WCHAR point_specular_description[] =
+-static const WCHAR brightness_description[] =
++static const WCHAR scale_description[] =
  L"<?xml version='1.0'?>                                                   \
    <Effect>                                                                \
-@@ -1804,23 +3199,6 @@ static HRESULT __stdcall scale_factory(IUnknown **effect)
+-    <Property name='DisplayName' type='string' value='Brightness'/>       \
++    <Property name='DisplayName' type='string' value='Scale'/>            \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Brightness'/>       \
++    <Property name='Description' type='string' value='Scale'/>            \
+     <Inputs>                                                              \
+       <Input name='Source'/>                                              \
+     </Inputs>                                                             \
+-    <Property name='WhitePoint' type='vector2' />                         \
+-    <Property name='BlackPoint' type='vector2' />                         \
++    <Property name='Scale' type='vector2' />                              \
++    <Property name='CenterPoint' type='vector2' />                        \
++    <Property name='InterpolationMode' type='enum' />                     \
++    <Property name='BorderMode' type='enum' />                            \
++    <Property name='Sharpness' type='float' />                            \
+   </Effect>";
+ 
+-struct brightness_properties
++struct scale_properties
+ {
+-    D2D_VECTOR_2F white_point;
+-    D2D_VECTOR_2F black_point;
++    D2D_VECTOR_2F scale;
++    D2D_VECTOR_2F center_point;
++    D2D1_BORDER_MODE border_mode;
++    float sharpness;
++    D2D1_SCALE_INTERPOLATION_MODE interpolation_mode;
+ };
+ 
+-EFFECT_PROPERTY_RW(brightness, white_point, VECTOR2)
+-EFFECT_PROPERTY_RW(brightness, black_point, VECTOR2)
++EFFECT_PROPERTY_RW(scale, scale, VECTOR2)
++EFFECT_PROPERTY_RW(scale, center_point, VECTOR2)
++EFFECT_PROPERTY_RW(scale, border_mode, ENUM)
++EFFECT_PROPERTY_RW(scale, sharpness, FLOAT)
++EFFECT_PROPERTY_RW(scale, interpolation_mode, ENUM)
+ 
+-static const D2D1_PROPERTY_BINDING brightness_bindings[] =
++static const D2D1_PROPERTY_BINDING scale_bindings[] =
+ {
+-    { L"WhitePoint", BINDING_RW(brightness, white_point) },
+-    { L"BlackPoint", BINDING_RW(brightness, black_point) },
++    { L"Scale", BINDING_RW(scale, scale) },
++    { L"CenterPoint", BINDING_RW(scale, center_point) },
++    { L"BorderMode", BINDING_RW(scale, border_mode) },
++    { L"Sharpness", BINDING_RW(scale, sharpness) },
++    { L"InterpolationMode", BINDING_RW(scale, interpolation_mode) },
+ };
+ 
+-static HRESULT __stdcall brightness_factory(IUnknown **effect)
++static HRESULT __stdcall scale_factory(IUnknown **effect)
+ {
+-    static const struct brightness_properties properties =
++    static const struct scale_properties properties =
+     {
+-        .white_point = { 1.0f, 1.0f },
++        .scale = { 1.0f, 1.0f },
++        .border_mode = D2D1_BORDER_MODE_SOFT,
++        .interpolation_mode = D2D1_SCALE_INTERPOLATION_MODE_LINEAR,
+     };
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+ }
+ 
+-static const WCHAR directional_blur_description[] =
++static const WCHAR _3d_transform_description[] =
+ L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Directional Blur'/> \
++    <Property name='DisplayName' type='string' value='3D Transform'/>     \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Directional Blur'/> \
++    <Property name='Description' type='string' value='3D Transform'/>     \
+     <Inputs>                                                              \
+       <Input name='Source'/>                                              \
+     </Inputs>                                                             \
+-    <Property name='StandardDeviation' type='float' />                    \
+-    <Property name='Angle' type='float' />                                \
+-    <Property name='Optimization' type='enum' />                          \
++    <Property name='InterpolationMode' type='enum' />                     \
+     <Property name='BorderMode' type='enum' />                            \
++    <Property name='TransformMatrix' type='matrix4x4' />                  \
+   </Effect>";
+ 
+-struct directional_blur_properties
++struct _3d_transform_properties
+ {
+-    float standard_deviation;
+-    float angle;
+-    D2D1_DIRECTIONALBLUR_OPTIMIZATION optimization;
++    D2D1_3DTRANSFORM_INTERPOLATION_MODE interpolation_mode;
+     D2D1_BORDER_MODE border_mode;
++    D2D_MATRIX_4X4_F transform_matrix;
+ };
+ 
+-EFFECT_PROPERTY_RW(directional_blur, standard_deviation, FLOAT)
+-EFFECT_PROPERTY_RW(directional_blur, angle, FLOAT)
+-EFFECT_PROPERTY_RW(directional_blur, optimization, ENUM)
+-EFFECT_PROPERTY_RW(directional_blur, border_mode, ENUM)
++EFFECT_PROPERTY_RW(_3d_transform, interpolation_mode, ENUM)
++EFFECT_PROPERTY_RW(_3d_transform, border_mode, ENUM)
++EFFECT_PROPERTY_RW(_3d_transform, transform_matrix, MATRIX_4X4)
+ 
+-static const D2D1_PROPERTY_BINDING directional_blur_bindings[] =
++static const D2D1_PROPERTY_BINDING _3d_transform_bindings[] =
+ {
+-    { L"StandardDeviation", BINDING_RW(directional_blur, standard_deviation) },
+-    { L"Angle", BINDING_RW(directional_blur, angle) },
+-    { L"Optimization", BINDING_RW(directional_blur, optimization) },
+-    { L"BorderMode", BINDING_RW(directional_blur, border_mode) },
++    { L"InterpolationMode", BINDING_RW(_3d_transform, interpolation_mode) },
++    { L"BorderMode", BINDING_RW(_3d_transform, border_mode) },
++    { L"TransformMatrix", BINDING_RW(_3d_transform, transform_matrix) },
+ };
+ 
+-static HRESULT __stdcall directional_blur_factory(IUnknown **effect)
++static HRESULT __stdcall _3d_transform_factory(IUnknown **effect)
+ {
+-    static const struct directional_blur_properties properties =
++    static const struct _3d_transform_properties properties =
+     {
+-        .standard_deviation = 3.0f,
+-        .optimization = D2D1_DIRECTIONALBLUR_OPTIMIZATION_BALANCED,
++        .interpolation_mode = D2D1_3DTRANSFORM_INTERPOLATION_MODE_LINEAR,
++        .border_mode = D2D1_BORDER_MODE_SOFT,
++        .transform_matrix = { ._11 = 1.0f, ._22 = 1.0f, ._33 = 1.0f, ._44 = 1.0f },
+     };
+     return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+ }
+ 
+-static const WCHAR hue_rotation_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Hue Rotation'/>     \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Hue Rotation'/>     \
+-    <Inputs>                                                              \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-    <Property name='Angle' type='float' />                                \
++static const WCHAR color_management_effect_description[] =
++L"<?xml version='1.0'?>                                                         \
++  <Effect>                                                                      \
++    <Property name='DisplayName' type='string' value='Color Management'/>       \
++    <Property name='Author'      type='string' value='The Wine Project'/>       \
++    <Property name='Category'    type='string' value='Stub'/>                   \
++    <Property name='Description' type='string' value='Color Management'/>       \
++    <Inputs>                                                                    \
++      <Input name='Source'/>                                                    \
++    </Inputs>                                                                   \
++    <Property name='SourceColorContext' type='colorcontext'/>                   \
++    <Property name='SourceRenderingIntent' type='enum'/>                        \
++    <Property name='DestinationColorContext' type='colorcontext'/>              \
++    <Property name='DestinationRenderingIntent' type='enum'/>                   \
++    <Property name='AlphaMode' type='enum'/>                                    \
++    <Property name='Quality' type='enum'/>                                      \
+   </Effect>";
+ 
+-struct hue_rotation_properties
++/* A tone curve in the general form of an ICC parametric curve:
++ * y = (a * x + b)^g + e for x >= d, and y = c * x + f below it. */
++struct colour_curve
++{
++    float g, a, b, c, d, e, f;
++};
++
++struct colour_space_desc
++{
++    /* PQ is carried as nits / 10000 and is not one of the parametric curves. */
++    BOOL pq;
++    struct colour_curve curves[3];
++    /* Maps linear RGB to CIE XYZ under D50. */
++    float rgb_to_xyz[3][3];
++    /* Whether values outside [0, 1] are clipped on the way in or out. */
++    BOOL clamp;
++    /* A predefined space that a matching one converts to without change. */
++    BOOL predefined;
++    /* Converted to or from only at the best quality. */
++    BOOL best_only;
++};
++
++/* Per channel: {g, a, b, c} and {d, e, f, unused}. */
++struct color_management_curve_constants
++{
++    float p0[3][4];
++    float p1[3][4];
++};
++
++struct color_management_constants
++{
++    INT32 source_pq;
++    INT32 destination_pq;
++    INT32 clamp_source;
++    INT32 clamp_destination;
++    INT32 premultiplied;
++    INT32 passthrough;
++    float pad[2];
++    float matrix[3][4];
++    struct color_management_curve_constants source;
++    struct color_management_curve_constants destination;
++};
++
++struct color_management_effect_properties
++{
++    /* Handed to the shader as its constant buffer, so it comes first. */
++    struct color_management_constants constants;
++    ID2D1ColorContext *source;
++    D2D1_COLORMANAGEMENT_RENDERING_INTENT source_intent;
++    ID2D1ColorContext *destination;
++    D2D1_COLORMANAGEMENT_RENDERING_INTENT destination_intent;
++    D2D1_COLORMANAGEMENT_ALPHA_MODE alpha_mode;
++    D2D1_COLORMANAGEMENT_QUALITY quality;
++};
++
++static struct color_management_effect_properties *color_management_props(const IUnknown *iface)
++{
++    return (struct color_management_effect_properties *)(impl_from_ID2D1EffectImpl((ID2D1EffectImpl *)iface) + 1);
++}
++
++static HRESULT color_management_set_context(ID2D1ColorContext **context, const BYTE *data, UINT32 data_size)
++{
++    ID2D1ColorContext *value;
++
++    if (data_size != sizeof(value))
++        return E_INVALIDARG;
++    memcpy(&value, data, sizeof(value));
++    if (value)
++        ID2D1ColorContext_AddRef(value);
++    if (*context)
++        ID2D1ColorContext_Release(*context);
++    *context = value;
++    return S_OK;
++}
++
++static HRESULT color_management_get_context(ID2D1ColorContext *context, BYTE *data,
++        UINT32 data_size, UINT32 *actual_size)
++{
++    if (actual_size)
++        *actual_size = sizeof(context);
++    if (!data)
++        return S_OK;
++    if (data_size != sizeof(context))
++        return E_INVALIDARG;
++    if (context)
++        ID2D1ColorContext_AddRef(context);
++    memcpy(data, &context, sizeof(context));
++    return S_OK;
++}
++
++static HRESULT color_management_set_enum(UINT32 *prop, UINT32 min, UINT32 max,
++        const BYTE *data, UINT32 data_size)
++{
++    UINT32 value;
++
++    if (data_size != sizeof(value))
++        return E_INVALIDARG;
++    memcpy(&value, data, sizeof(value));
++    if (value < min || value > max)
++        return E_INVALIDARG;
++    *prop = value;
++    return S_OK;
++}
++
++static HRESULT __stdcall color_management_effect_source_set(IUnknown *iface, const BYTE *data, UINT32 data_size)
++{
++    return color_management_set_context(&color_management_props(iface)->source, data, data_size);
++}
++
++static HRESULT __stdcall color_management_effect_source_get(const IUnknown *iface, BYTE *data,
++        UINT32 data_size, UINT32 *actual_size)
++{
++    return color_management_get_context(color_management_props(iface)->source, data, data_size, actual_size);
++}
++
++static HRESULT __stdcall color_management_effect_destination_set(IUnknown *iface, const BYTE *data, UINT32 data_size)
++{
++    return color_management_set_context(&color_management_props(iface)->destination, data, data_size);
++}
++
++static HRESULT __stdcall color_management_effect_destination_get(const IUnknown *iface, BYTE *data,
++        UINT32 data_size, UINT32 *actual_size)
++{
++    return color_management_get_context(color_management_props(iface)->destination, data, data_size, actual_size);
++}
++
++static HRESULT __stdcall color_management_effect_source_intent_set(IUnknown *iface, const BYTE *data, UINT32 data_size)
++{
++    return color_management_set_enum(&color_management_props(iface)->source_intent,
++            D2D1_COLORMANAGEMENT_RENDERING_INTENT_PERCEPTUAL,
++            D2D1_COLORMANAGEMENT_RENDERING_INTENT_ABSOLUTE_COLORIMETRIC, data, data_size);
++}
++
++static HRESULT __stdcall color_management_effect_destination_intent_set(IUnknown *iface, const BYTE *data, UINT32 data_size)
++{
++    return color_management_set_enum(&color_management_props(iface)->destination_intent,
++            D2D1_COLORMANAGEMENT_RENDERING_INTENT_PERCEPTUAL,
++            D2D1_COLORMANAGEMENT_RENDERING_INTENT_ABSOLUTE_COLORIMETRIC, data, data_size);
++}
++
++static HRESULT __stdcall color_management_effect_alpha_mode_set(IUnknown *iface, const BYTE *data, UINT32 data_size)
++{
++    return color_management_set_enum(&color_management_props(iface)->alpha_mode,
++            D2D1_COLORMANAGEMENT_ALPHA_MODE_PREMULTIPLIED, D2D1_COLORMANAGEMENT_ALPHA_MODE_STRAIGHT, data, data_size);
++}
++
++static HRESULT __stdcall color_management_effect_quality_set(IUnknown *iface, const BYTE *data, UINT32 data_size)
++{
++    return color_management_set_enum(&color_management_props(iface)->quality,
++            D2D1_COLORMANAGEMENT_QUALITY_PROOF, D2D1_COLORMANAGEMENT_QUALITY_BEST, data, data_size);
++}
++
++EFFECT_PROPERTY_GET(color_management_effect, source_intent, ENUM)
++EFFECT_PROPERTY_GET(color_management_effect, destination_intent, ENUM)
++EFFECT_PROPERTY_GET(color_management_effect, alpha_mode, ENUM)
++EFFECT_PROPERTY_GET(color_management_effect, quality, ENUM)
++
++static const D2D1_PROPERTY_BINDING color_management_effect_bindings[] =
++{
++    { L"SourceColorContext", BINDING_RW(color_management_effect, source) },
++    { L"SourceRenderingIntent", BINDING_RW(color_management_effect, source_intent) },
++    { L"DestinationColorContext", BINDING_RW(color_management_effect, destination) },
++    { L"DestinationRenderingIntent", BINDING_RW(color_management_effect, destination_intent) },
++    { L"AlphaMode", BINDING_RW(color_management_effect, alpha_mode) },
++    { L"Quality", BINDING_RW(color_management_effect, quality) },
++};
++
++/* Curves are mirrored for negative values so that wide-gamut colour survives
++ * where it is not clipped. PQ values convert to and from nits / 80, the
++ * scale of scRGB. */
++static const char color_management_ps[] =
++    "struct curve\n"
++    "{\n"
++    "    float4 p0[3];\n"
++    "    float4 p1[3];\n"
++    "};\n"
++    "cbuffer constants : register(b0)\n"
++    "{\n"
++    "    int source_pq;\n"
++    "    int destination_pq;\n"
++    "    int clamp_source;\n"
++    "    int clamp_destination;\n"
++    "    int premultiplied;\n"
++    "    int passthrough;\n"
++    "    float2 pad;\n"
++    "    row_major float3x4 m;\n"
++    "    curve source;\n"
++    "    curve destination;\n"
++    "};\n"
++    "Texture2D InputTexture : register(t0);\n"
++    "SamplerState InputSampler : register(s0);\n"
++    "\n"
++    "static const float pq_m1 = 2610.0 / 16384.0, pq_m2 = 2523.0 / 4096.0 * 128.0;\n"
++    "static const float pq_c1 = 3424.0 / 4096.0, pq_c2 = 2413.0 / 4096.0 * 32.0;\n"
++    "static const float pq_c3 = 2392.0 / 4096.0 * 32.0;\n"
++    "\n"
++    "float decode_channel(float x, float4 p0, float4 p1)\n"
++    "{\n"
++    "    float a = abs(x);\n"
++    "    float y = a >= p1.x ? pow(max(p0.y * a + p0.z, 0.0), p0.x) + p1.y : p0.w * a + p1.z;\n"
++    "    return x < 0.0 ? -y : y;\n"
++    "}\n"
++    "\n"
++    "float encode_channel(float y, float4 p0, float4 p1)\n"
++    "{\n"
++    "    float a = abs(y), x;\n"
++    "    if (a >= p1.w)\n"
++    "        x = (pow(max(a - p1.y, 0.0), 1.0 / p0.x) - p0.z) / p0.y;\n"
++    "    else\n"
++    "        x = p0.w ? (a - p1.z) / p0.w : 0.0;\n"
++    "    return y < 0.0 ? -x : x;\n"
++    "}\n"
++    "\n"
++    "float3 pq_decode(float3 c)\n"
++    "{\n"
++    "    float3 p = pow(abs(c), 1.0 / pq_m2);\n"
++    "    return sign(c) * pow(max(p - pq_c1, 0.0) / (pq_c2 - pq_c3 * p), 1.0 / pq_m1) * (10000.0 / 80.0);\n"
++    "}\n"
++    "\n"
++    "float3 pq_encode(float3 c)\n"
++    "{\n"
++    "    float3 p = pow(max(c, 0.0) * (80.0 / 10000.0), pq_m1);\n"
++    "    return pow((pq_c1 + pq_c2 * p) / (1.0 + pq_c3 * p), pq_m2);\n"
++    "}\n"
++    "\n"
++    "float4 main(float4 clip : SV_POSITION, float4 scene : SCENE_POSITION,\n"
++    "        float4 uv : TEXCOORD0) : SV_TARGET\n"
++    "{\n"
++    "    float4 colour = InputTexture.Sample(InputSampler, uv.xy);\n"
++    "    float3 rgb = colour.rgb;\n"
++    "    int i;\n"
++    "\n"
++    "    if (passthrough)\n"
++    "        return colour;\n"
++    "    if (premultiplied)\n"
++    "        rgb = colour.a ? rgb / colour.a : 0.0;\n"
++    "    if (clamp_source)\n"
++    "        rgb = saturate(rgb);\n"
++    "    if (source_pq)\n"
++    "        rgb = pq_decode(rgb);\n"
++    "    else\n"
++    "        for (i = 0; i < 3; ++i)\n"
++    "            rgb[i] = decode_channel(rgb[i], source.p0[i], source.p1[i]);\n"
++    "    rgb = mul(m, float4(rgb, 1.0));\n"
++    "    if (clamp_destination)\n"
++    "        rgb = saturate(rgb);\n"
++    "    if (destination_pq)\n"
++    "        rgb = pq_encode(rgb);\n"
++    "    else\n"
++    "        for (i = 0; i < 3; ++i)\n"
++    "            rgb[i] = encode_channel(rgb[i], destination.p0[i], destination.p1[i]);\n"
++    "    if (premultiplied)\n"
++    "        rgb *= colour.a;\n"
++    "    return float4(rgb, colour.a);\n"
++    "}\n";
++
++static const GUID GUID_d2d_color_management_ps =
++        {0x6a0e5c37, 0x2b4f, 0x4d8a, {0x9e, 0x31, 0x7c, 0x52, 0xa0, 0x1d, 0x6f, 0x93}};
++
++static const struct colour_curve colour_curve_linear = {1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
++static const struct colour_curve colour_curve_srgb =
++        {2.4f, 1.0f / 1.055f, 0.055f / 1.055f, 1.0f / 12.92f, 0.04045f, 0.0f, 0.0f};
++
++/* sRGB primaries adapted to D50, as an ICC profile carries them. */
++static const float colour_srgb_to_xyz[3][3] =
++{
++    {0.4360747f, 0.3850649f, 0.1430804f},
++    {0.2225045f, 0.7168786f, 0.0606169f},
++    {0.0139322f, 0.0971045f, 0.7141733f},
++};
++
++/* BT.2020 to BT.709 primaries, from ITU-R BT.2087. */
++static const float colour_2020_to_709[3][3] =
++{
++    { 1.6604910f, -0.5876411f, -0.0728499f},
++    {-0.1245505f,  1.1328999f, -0.0083494f},
++    {-0.0181508f, -0.1005789f,  1.1187297f},
++};
++
++static void colour_matrix_multiply(float out[3][3], const float a[3][3], const float b[3][3])
++{
++    float r[3][3];
++    unsigned int i, j, k;
++
++    for (i = 0; i < 3; ++i)
++        for (j = 0; j < 3; ++j)
++            for (r[i][j] = 0.0f, k = 0; k < 3; ++k)
++                r[i][j] += a[i][k] * b[k][j];
++    memcpy(out, r, sizeof(r));
++}
++
++static BOOL colour_matrix_invert(float out[3][3], const float m[3][3])
++{
++    float det, r[3][3];
++    unsigned int i, j;
++
++    r[0][0] = m[1][1] * m[2][2] - m[1][2] * m[2][1];
++    r[0][1] = m[0][2] * m[2][1] - m[0][1] * m[2][2];
++    r[0][2] = m[0][1] * m[1][2] - m[0][2] * m[1][1];
++    r[1][0] = m[1][2] * m[2][0] - m[1][0] * m[2][2];
++    r[1][1] = m[0][0] * m[2][2] - m[0][2] * m[2][0];
++    r[1][2] = m[0][2] * m[1][0] - m[0][0] * m[1][2];
++    r[2][0] = m[1][0] * m[2][1] - m[1][1] * m[2][0];
++    r[2][1] = m[0][1] * m[2][0] - m[0][0] * m[2][1];
++    r[2][2] = m[0][0] * m[1][1] - m[0][1] * m[1][0];
++    det = m[0][0] * r[0][0] + m[0][1] * r[1][0] + m[0][2] * r[2][0];
++    if (fabsf(det) < 1e-8f)
++        return FALSE;
++    for (i = 0; i < 3; ++i)
++        for (j = 0; j < 3; ++j)
++            out[i][j] = r[i][j] / det;
++    return TRUE;
++}
++
++static float colour_curve_eval(const struct colour_curve *c, float x)
++{
++    if (x >= c->d)
++        return powf(max(c->a * x + c->b, 0.0f), c->g) + c->e;
++    return c->c * x + c->f;
++}
++
++static UINT32 icc_read32(const BYTE *p)
++{
++    return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
++}
++
++static float icc_read_s15(const BYTE *p)
++{
++    return (INT32)icc_read32(p) / 65536.0f;
++}
++
++static const BYTE *icc_find_tag(const BYTE *profile, UINT32 size, const char *sig, UINT32 *tag_size)
++{
++    UINT32 count, i, offset, length;
++
++    if (size < 132)
++        return NULL;
++    count = icc_read32(profile + 128);
++    if (count > (size - 132) / 12)
++        return NULL;
++    for (i = 0; i < count; ++i)
++    {
++        const BYTE *entry = profile + 132 + 12 * i;
++
++        if (memcmp(entry, sig, 4))
++            continue;
++        offset = icc_read32(entry + 4);
++        length = icc_read32(entry + 8);
++        if (offset > size || length > size - offset || length < 12)
++            return NULL;
++        *tag_size = length;
++        return profile + offset;
++    }
++    return NULL;
++}
++
++/* Fits a sampled curve with the parametric form: an sRGB-shaped curve when
++ * it is one, otherwise the pure power that is closest at its samples. */
++static void colour_curve_fit(const float *samples, UINT32 count, struct colour_curve *curve)
++{
++    float error, best_error = FLT_MAX, lo = 0.2f, hi = 5.0f, g1, g2, e1, e2;
++    const struct colour_curve *candidates[] = {&colour_curve_linear, &colour_curve_srgb};
++    struct colour_curve power = colour_curve_linear;
++    unsigned int i, j, k;
++
++    for (i = 0; i < ARRAY_SIZE(candidates); ++i)
++    {
++        for (error = 0.0f, j = 0; j < count; ++j)
++            error = max(error, fabsf(colour_curve_eval(candidates[i], j / (count - 1.0f)) - samples[j]));
++        if (error < best_error)
++        {
++            best_error = error;
++            *curve = *candidates[i];
++        }
++    }
++
++    for (k = 0; k < 60; ++k)
++    {
++        g1 = lo + (hi - lo) * 0.382f;
++        g2 = lo + (hi - lo) * 0.618f;
++        for (e1 = e2 = 0.0f, j = 0; j < count; ++j)
++        {
++            float x = j / (count - 1.0f);
++            e1 = max(e1, fabsf(powf(x, g1) - samples[j]));
++            e2 = max(e2, fabsf(powf(x, g2) - samples[j]));
++        }
++        if (e1 < e2)
++            hi = g2;
++        else
++            lo = g1;
++    }
++    power.g = (lo + hi) / 2.0f;
++    for (error = 0.0f, j = 0; j < count; ++j)
++        error = max(error, fabsf(powf(j / (count - 1.0f), power.g) - samples[j]));
++    if (error < best_error)
++    {
++        best_error = error;
++        *curve = power;
++    }
++
++    if (best_error > 1.0f / 255.0f)
++        FIXME("Tone curve approximated with an error of %.8e.\n", best_error);
++}
++
++static BOOL icc_parse_curve(const BYTE *tag, UINT32 size, struct colour_curve *curve)
++{
++    static const unsigned int para_counts[] = {1, 3, 4, 5, 7};
++    UINT32 count, type, i;
++    float p[7], *samples;
++
++    if (!memcmp(tag, "curv", 4))
++    {
++        count = icc_read32(tag + 8);
++        if (count > (size - 12) / 2)
++            return FALSE;
++        if (!count)
++        {
++            *curve = colour_curve_linear;
++            return TRUE;
++        }
++        if (count == 1)
++        {
++            *curve = colour_curve_linear;
++            curve->g = ((tag[12] << 8) | tag[13]) / 256.0f;
++            return TRUE;
++        }
++        if (!(samples = malloc(count * sizeof(*samples))))
++            return FALSE;
++        for (i = 0; i < count; ++i)
++            samples[i] = ((tag[12 + 2 * i] << 8) | tag[13 + 2 * i]) / 65535.0f;
++        colour_curve_fit(samples, count, curve);
++        free(samples);
++        return TRUE;
++    }
++
++    if (!memcmp(tag, "para", 4))
++    {
++        type = (tag[8] << 8) | tag[9];
++        if (type >= ARRAY_SIZE(para_counts) || size < 12 + 4 * para_counts[type])
++            return FALSE;
++        for (i = 0; i < para_counts[type]; ++i)
++            p[i] = icc_read_s15(tag + 12 + 4 * i);
++        *curve = colour_curve_linear;
++        curve->g = p[0];
++        switch (type)
++        {
++            case 0:
++                break;
++            case 1:
++            case 2:
++                curve->a = p[1];
++                curve->b = p[2];
++                curve->d = p[1] ? -p[2] / p[1] : 0.0f;
++                if (type == 2)
++                    curve->e = curve->f = p[3];
++                break;
++            case 3:
++            case 4:
++                curve->a = p[1];
++                curve->b = p[2];
++                curve->c = p[3];
++                curve->d = p[4];
++                if (type == 4)
++                {
++                    curve->e = p[5];
++                    curve->f = p[6];
++                }
++                break;
++        }
++        return TRUE;
++    }
++
++    return FALSE;
++}
++
++/* Only matrix/TRC RGB profiles are understood. */
++static BOOL icc_parse_profile(const BYTE *profile, UINT32 size, struct colour_space_desc *desc)
+ {
+-    float angle;
+-};
++    static const char *xyz_tags[] = {"rXYZ", "gXYZ", "bXYZ"};
++    static const char *trc_tags[] = {"rTRC", "gTRC", "bTRC"};
++    UINT32 tag_size, i, j;
++    const BYTE *tag;
+ 
+-EFFECT_PROPERTY_RW(hue_rotation, angle, FLOAT)
++    if (size < 132 || memcmp(profile + 16, "RGB ", 4) || memcmp(profile + 20, "XYZ ", 4))
++        return FALSE;
+ 
+-static const D2D1_PROPERTY_BINDING hue_rotation_bindings[] =
+-{
+-    { L"Angle", BINDING_RW(hue_rotation, angle) },
+-};
++    for (i = 0; i < 3; ++i)
++    {
++        if (!(tag = icc_find_tag(profile, size, xyz_tags[i], &tag_size)) || tag_size < 20 || memcmp(tag, "XYZ ", 4))
++            return FALSE;
++        for (j = 0; j < 3; ++j)
++            desc->rgb_to_xyz[j][i] = icc_read_s15(tag + 8 + 4 * j);
++        if (!(tag = icc_find_tag(profile, size, trc_tags[i], &tag_size))
++                || !icc_parse_curve(tag, tag_size, &desc->curves[i]))
++            return FALSE;
++    }
+ 
+-static HRESULT __stdcall hue_rotation_factory(IUnknown **effect)
+-{
+-    static const struct hue_rotation_properties properties = {};
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++    return TRUE;
+ }
+ 
+-static const WCHAR saturation_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Saturation'/>       \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Saturation'/>       \
+-    <Inputs>                                                              \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-    <Property name='Saturation' type='float' />                           \
+-  </Effect>";
+-
+-struct saturation_properties
++static void colour_space_desc_init(struct colour_space_desc *desc, const struct colour_curve *curve,
++        BOOL bt2020, BOOL clamp)
+ {
+-    float saturation;
+-};
++    unsigned int i;
+ 
+-EFFECT_PROPERTY_RW(saturation, saturation, FLOAT)
++    desc->pq = FALSE;
++    for (i = 0; i < 3; ++i)
++        desc->curves[i] = *curve;
++    memcpy(desc->rgb_to_xyz, colour_srgb_to_xyz, sizeof(desc->rgb_to_xyz));
++    if (bt2020)
++        colour_matrix_multiply(desc->rgb_to_xyz, colour_srgb_to_xyz, colour_2020_to_709);
++    desc->clamp = clamp;
++    desc->predefined = TRUE;
++    desc->best_only = bt2020;
++}
+ 
+-static const D2D1_PROPERTY_BINDING saturation_bindings[] =
++static HRESULT color_management_describe(ID2D1ColorContext *context, struct colour_space_desc *desc)
+ {
+-    { L"Saturation", BINDING_RW(saturation, saturation) },
+-};
++    D2D1_COLOR_CONTEXT_TYPE type = D2D1_COLOR_CONTEXT_TYPE_ICC;
++    DXGI_COLOR_SPACE_TYPE dxgi_space = DXGI_COLOR_SPACE_CUSTOM;
++    D2D1_SIMPLE_COLOR_PROFILE simple;
++    ID2D1ColorContext1 *context1;
++    BYTE *profile;
++    UINT32 size;
++    BOOL parsed;
+ 
+-static HRESULT __stdcall saturation_factory(IUnknown **effect)
+-{
+-    static const struct saturation_properties properties =
+-    {
+-        .saturation = 0.5f,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+-}
++    /* No context means sRGB. */
++    colour_space_desc_init(desc, &colour_curve_srgb, FALSE, TRUE);
++    if (!context)
++        return S_OK;
+ 
+-static const WCHAR scale_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Scale'/>            \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Scale'/>            \
+-    <Inputs>                                                              \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-    <Property name='Scale' type='vector2' />                              \
+-    <Property name='CenterPoint' type='vector2' />                        \
+-    <Property name='InterpolationMode' type='enum' />                     \
+-    <Property name='BorderMode' type='enum' />                            \
+-    <Property name='Sharpness' type='float' />                            \
+-  </Effect>";
++    if (SUCCEEDED(ID2D1ColorContext_QueryInterface(context, &IID_ID2D1ColorContext1, (void **)&context1)))
++    {
++        type = ID2D1ColorContext1_GetColorContextType(context1);
++        if (type == D2D1_COLOR_CONTEXT_TYPE_DXGI)
++            dxgi_space = ID2D1ColorContext1_GetDXGIColorSpace(context1);
++        else if (type == D2D1_COLOR_CONTEXT_TYPE_SIMPLE
++                && SUCCEEDED(ID2D1ColorContext1_GetSimpleColorProfile(context1, &simple)))
++        {
++            FIXME("Treating a simple colour profile as having BT.709 primaries.\n");
++            colour_space_desc_init(desc, simple.gamma == D2D1_GAMMA1_G10 ? &colour_curve_linear
++                    : &colour_curve_srgb, FALSE, FALSE);
++            desc->pq = simple.gamma == D2D1_GAMMA1_G2084;
++        }
++        ID2D1ColorContext1_Release(context1);
++    }
+ 
+-struct scale_properties
+-{
+-    D2D_VECTOR_2F scale;
+-    D2D_VECTOR_2F center_point;
+-    D2D1_BORDER_MODE border_mode;
+-    float sharpness;
+-    D2D1_SCALE_INTERPOLATION_MODE interpolation_mode;
+-};
++    if (type == D2D1_COLOR_CONTEXT_TYPE_DXGI)
++    {
++        switch (dxgi_space)
++        {
++            case DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709:
++                break;
++            case DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709:
++                colour_space_desc_init(desc, &colour_curve_linear, FALSE, FALSE);
++                break;
++            case DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020:
++                colour_space_desc_init(desc, &colour_curve_linear, TRUE, FALSE);
++                desc->pq = TRUE;
++                break;
++            case DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P2020:
++                colour_space_desc_init(desc, &colour_curve_srgb, TRUE, FALSE);
++                break;
++            default:
++                FIXME("Unhandled DXGI colour space %#x.\n", dxgi_space);
++                return E_INVALIDARG;
++        }
++    }
++    else if (type == D2D1_COLOR_CONTEXT_TYPE_ICC)
++    {
++        switch (ID2D1ColorContext_GetColorSpace(context))
++        {
++            case D2D1_COLOR_SPACE_SRGB:
++                break;
++            case D2D1_COLOR_SPACE_SCRGB:
++                colour_space_desc_init(desc, &colour_curve_linear, FALSE, FALSE);
++                break;
++            default:
++                /* A profile is never taken to be one of the predefined
++                 * spaces, so even an identical one is converted, and
++                 * clipped. */
++                desc->predefined = FALSE;
++                size = ID2D1ColorContext_GetProfileSize(context);
++                if (!(profile = malloc(size)))
++                    return E_OUTOFMEMORY;
++                parsed = SUCCEEDED(ID2D1ColorContext_GetProfile(context, profile, size))
++                        && icc_parse_profile(profile, size, desc);
++                free(profile);
++                if (!parsed)
++                {
++                    FIXME("Unsupported ICC profile; treating it as sRGB.\n");
++                    colour_space_desc_init(desc, &colour_curve_srgb, FALSE, TRUE);
++                    desc->predefined = FALSE;
++                }
++                break;
++        }
++    }
+ 
+-EFFECT_PROPERTY_RW(scale, scale, VECTOR2)
+-EFFECT_PROPERTY_RW(scale, center_point, VECTOR2)
+-EFFECT_PROPERTY_RW(scale, border_mode, ENUM)
+-EFFECT_PROPERTY_RW(scale, sharpness, FLOAT)
+-EFFECT_PROPERTY_RW(scale, interpolation_mode, ENUM)
++    return S_OK;
++}
+ 
+-static const D2D1_PROPERTY_BINDING scale_bindings[] =
++static void color_management_set_curves(struct color_management_curve_constants *c,
++        const struct colour_space_desc *desc)
+ {
+-    { L"Scale", BINDING_RW(scale, scale) },
+-    { L"CenterPoint", BINDING_RW(scale, center_point) },
+-    { L"BorderMode", BINDING_RW(scale, border_mode) },
+-    { L"Sharpness", BINDING_RW(scale, sharpness) },
+-    { L"InterpolationMode", BINDING_RW(scale, interpolation_mode) },
+-};
++    unsigned int i;
+ 
+-static HRESULT __stdcall scale_factory(IUnknown **effect)
+-{
+-    static const struct scale_properties properties =
++    for (i = 0; i < 3; ++i)
+     {
+-        .scale = { 1.0f, 1.0f },
+-        .border_mode = D2D1_BORDER_MODE_SOFT,
+-        .interpolation_mode = D2D1_SCALE_INTERPOLATION_MODE_LINEAR,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++        const struct colour_curve *curve = &desc->curves[i];
++
++        c->p0[i][0] = curve->g;
++        c->p0[i][1] = curve->a;
++        c->p0[i][2] = curve->b;
++        c->p0[i][3] = curve->c;
++        c->p1[i][0] = curve->d;
++        c->p1[i][1] = curve->e;
++        c->p1[i][2] = curve->f;
++        /* Where the decoded value crosses over between the two segments. */
++        c->p1[i][3] = colour_curve_eval(curve, curve->d);
++    }
  }
  
 -static const WCHAR premultiply_description[] =
@@ -1990,16 +3351,76 @@ index c298aeca93d..7e7d3314546 100644
 -  </Effect>";
 -
 -static HRESULT __stdcall premultiply_factory(IUnknown **effect)
--{
++static HRESULT STDMETHODCALLTYPE d2d_color_management_impl_Initialize(ID2D1EffectImpl *iface,
++        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
+ {
 -    return d2d_effect_create_impl(effect, NULL, 0);
--}
--
- static const WCHAR _3d_transform_description[] =
- L"<?xml version='1.0'?>                                                   \
-   <Effect>                                                                \
-@@ -1865,59 +3243,98 @@ static HRESULT __stdcall _3d_transform_factory(IUnknown **effect)
-     return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++    return d2d_builtin_effect_init_full(iface, context, graph, &GUID_d2d_color_management_ps,
++            color_management_ps, 1, sizeof(struct color_management_constants));
  }
+ 
+-static const WCHAR _3d_transform_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='3D Transform'/>     \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='3D Transform'/>     \
+-    <Inputs>                                                              \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-    <Property name='InterpolationMode' type='enum' />                     \
+-    <Property name='BorderMode' type='enum' />                            \
+-    <Property name='TransformMatrix' type='matrix4x4' />                  \
+-  </Effect>";
+-
+-struct _3d_transform_properties
++static HRESULT STDMETHODCALLTYPE d2d_color_management_impl_PrepareForRender(ID2D1EffectImpl *iface,
++        D2D1_CHANGE_TYPE type)
+ {
+-    D2D1_3DTRANSFORM_INTERPOLATION_MODE interpolation_mode;
+-    D2D1_BORDER_MODE border_mode;
+-    D2D_MATRIX_4X4_F transform_matrix;
+-};
+-
+-EFFECT_PROPERTY_RW(_3d_transform, interpolation_mode, ENUM)
+-EFFECT_PROPERTY_RW(_3d_transform, border_mode, ENUM)
+-EFFECT_PROPERTY_RW(_3d_transform, transform_matrix, MATRIX_4X4)
++    struct color_management_effect_properties *props = color_management_props((IUnknown *)iface);
++    struct color_management_constants *c = &props->constants;
++    struct colour_space_desc source, destination;
++    float xyz_to_rgb[3][3], m[3][3];
++    unsigned int i, j;
++    HRESULT hr;
+ 
+-static const D2D1_PROPERTY_BINDING _3d_transform_bindings[] =
+-{
+-    { L"InterpolationMode", BINDING_RW(_3d_transform, interpolation_mode) },
+-    { L"BorderMode", BINDING_RW(_3d_transform, border_mode) },
+-    { L"TransformMatrix", BINDING_RW(_3d_transform, transform_matrix) },
+-};
++    if (FAILED(hr = color_management_describe(props->source, &source)))
++        return hr;
++    if (FAILED(hr = color_management_describe(props->destination, &destination)))
++        return hr;
+ 
+-static HRESULT __stdcall _3d_transform_factory(IUnknown **effect)
+-{
+-    static const struct _3d_transform_properties properties =
++    memset(c, 0, sizeof(*c));
++    if (source.predefined && destination.predefined && source.pq == destination.pq
++            && !memcmp(source.curves, destination.curves, sizeof(source.curves))
++            && !memcmp(source.rgb_to_xyz, destination.rgb_to_xyz, sizeof(source.rgb_to_xyz)))
+     {
+-        .interpolation_mode = D2D1_3DTRANSFORM_INTERPOLATION_MODE_LINEAR,
+-        .border_mode = D2D1_BORDER_MODE_SOFT,
+-        .transform_matrix = { ._11 = 1.0f, ._22 = 1.0f, ._33 = 1.0f, ._44 = 1.0f },
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+-}
++        c->passthrough = 1;
++        return d2d_effect_impl_PrepareForRender(iface, type);
++    }
  
 -static const WCHAR color_management_description[] =
 -L"<?xml version='1.0'?>                                                   \
@@ -2018,101 +3439,69 @@ index c298aeca93d..7e7d3314546 100644
 -    <Property name='AlphaMode' type='enum' />                             \
 -    <Property name='Quality' type='enum' />                               \
 -  </Effect>";
--
++    if ((source.best_only || destination.best_only) && props->quality != D2D1_COLORMANAGEMENT_QUALITY_BEST)
++        return E_INVALIDARG;
+ 
 -struct color_management_properties
--{
++    if (!colour_matrix_invert(xyz_to_rgb, destination.rgb_to_xyz))
++        return E_INVALIDARG;
++    colour_matrix_multiply(m, xyz_to_rgb, source.rgb_to_xyz);
++    for (i = 0; i < 3; ++i)
++        for (j = 0; j < 3; ++j)
++            c->matrix[i][j] = m[i][j];
++
++    c->source_pq = source.pq;
++    c->destination_pq = destination.pq;
++    c->clamp_source = source.clamp;
++    c->clamp_destination = destination.clamp;
++    c->premultiplied = props->alpha_mode == D2D1_COLORMANAGEMENT_ALPHA_MODE_PREMULTIPLIED;
++    color_management_set_curves(&c->source, &source);
++    color_management_set_curves(&c->destination, &destination);
++
++    return d2d_effect_impl_PrepareForRender(iface, type);
++}
++
++static ULONG STDMETHODCALLTYPE d2d_color_management_impl_Release(ID2D1EffectImpl *iface)
+ {
 -    ID2D1ColorContext *source_color_context;
 -    D2D1_COLORMANAGEMENT_RENDERING_INTENT source_rendering_intent;
 -    ID2D1ColorContext *destination_color_context;
 -    D2D1_COLORMANAGEMENT_RENDERING_INTENT destination_rendering_intent;
 -    D2D1_COLORMANAGEMENT_ALPHA_MODE alpha_mode;
 -    D2D1_COLORMANAGEMENT_QUALITY quality;
-+static const WCHAR color_management_effect_description[] =
-+L"<?xml version='1.0'?>                                                            \
-+<Effect>                                                                           \
-+  <Property name='DisplayName' type='string' value='ColorManagementEffect' />      \
-+  <Property name='Author' type='string' value='The Wine Project' />                                 \
-+  <Property name='Category' type='string' value='Stub' />                               \
-+  <Property name='Description' type='string' value='ColorManagementEffect' />                            \
-+  <Inputs minimum='1' maximum='1'>                                                 \
-+    <Input name='Source' />                                                        \
-+  </Inputs>                                                                        \
-+  <Property name='SourceContext' type='colorcontext'>  \
-+    <Property name='DisplayName' type='string' value='SourceContext' />  \
-+  </Property>   \
-+  <Property name='SourceIntent' type='enum'>   \
-+    <Property name='DisplayName' type='string' value='SourceIntent' />   \
-+    <Property name='Default' type='enum' value='0' />   \
-+    <Fields>  \
-+      <Field name='Perceptual' displayname='Perceptual' index='0' />  \
-+    </Fields>   \
-+  </Property>   \
-+  <Property name='DestinationContext' type='colorcontext'>   \
-+    <Property name='DisplayName' type='string' value='DestinationContext' />   \
-+  </Property>   \
-+  <Property name='DestinationIntent' type='enum'>  \
-+    <Property name='DisplayName' type='string' value='DestinationIntent' />  \
-+    <Property name='Default' type='enum' value='0' />   \
-+    <Fields>  \
-+      <Field name='Perceptual' displayname='Perceptual' index='0' />  \
-+    </Fields>   \
-+  </Property>   \
-+  <Property name='AlphaMode' type='enum'>   \
-+    <Property name='DisplayName' type='string' value='AlphaMode' />   \
-+    <Property name='Default' type='enum' value='1' />   \
-+    <Fields>  \
-+      <Field name='Premultiplied' displayname='Premultiplied' index='1' />  \
-+      <Field name='Straight' displayname='Straight' index='2' />  \
-+    </Fields>   \
-+  </Property>   \
-+  <Property name='Quality' type='enum'>   \
-+    <Property name='DisplayName' type='string' value='Quality' />   \
-+    <Property name='Default' type='enum' value='0' />   \
-+    <Fields>  \
-+      <Field name='Proof' displayname='Proof' index='0' />  \
-+      <Field name='Normal' displayname='Normal' index='1' />  \
-+      <Field name='Best' displayname='Best' index='2' />  \
-+    </Fields>   \
-+  </Property>   \
-+</Effect> \
-+";
+-};
++    struct color_management_effect_properties *props = color_management_props((IUnknown *)iface);
++    struct d2d_effect_impl *effect = impl_from_ID2D1EffectImpl(iface);
 +
-+struct color_management_effect_properties
-+{
-+    ID2D1ColorContext source;
-+    UINT32 sourceRenderingIntent;
-+    ID2D1ColorContext destination;
-+    UINT32 destinationRenderingIntent;
-+    UINT32 alpha_mode;
-+    UINT32 quality;
- };
++    if (effect->refcount == 1)
++    {
++        if (props->source)
++            ID2D1ColorContext_Release(props->source);
++        if (props->destination)
++            ID2D1ColorContext_Release(props->destination);
++        props->source = props->destination = NULL;
++    }
  
 -EFFECT_PROPERTY_RW(color_management, source_rendering_intent, ENUM)
 -EFFECT_PROPERTY_RW(color_management, destination_rendering_intent, ENUM)
 -EFFECT_PROPERTY_RW(color_management, alpha_mode, ENUM)
 -EFFECT_PROPERTY_RW(color_management, quality, ENUM)
--
++    return d2d_effect_impl_Release(iface);
++}
+ 
 -static const D2D1_PROPERTY_BINDING color_management_bindings[] =
--{
++static const ID2D1EffectImplVtbl d2d_color_management_impl_vtbl =
+ {
 -    { L"SourceRenderingIntent", BINDING_RW(color_management, source_rendering_intent) },
 -    { L"DestinationRenderingIntent", BINDING_RW(color_management, destination_rendering_intent) },
 -    { L"AlphaMode", BINDING_RW(color_management, alpha_mode) },
 -    { L"Quality", BINDING_RW(color_management, quality) },
-+EFFECT_PROPERTY_RW(color_management_effect, source, IUNKNOWN)
-+EFFECT_PROPERTY_RW(color_management_effect, sourceRenderingIntent, ENUM)
-+EFFECT_PROPERTY_RW(color_management_effect, destination, IUNKNOWN)
-+EFFECT_PROPERTY_RW(color_management_effect, destinationRenderingIntent, ENUM)
-+EFFECT_PROPERTY_RW(color_management_effect, alpha_mode, ENUM)
-+EFFECT_PROPERTY_RW(color_management_effect, quality, ENUM)
-+
-+static const D2D1_PROPERTY_BINDING color_management_effect_bindings[] =
-+{
-+    { L"SourceContext", BINDING_RW(color_management_effect, source) },
-+    { L"SourceIntent", BINDING_RW(color_management_effect, sourceRenderingIntent) },
-+    { L"DestinationContext", BINDING_RW(color_management_effect, destination) },
-+    { L"DestinationIntent", BINDING_RW(color_management_effect, destinationRenderingIntent) },
-+    { L"AlphaMode", BINDING_RW(color_management_effect, alpha_mode) },
-+    { L"Quality", BINDING_RW(color_management_effect, quality) },
++    d2d_effect_impl_QueryInterface,
++    d2d_effect_impl_AddRef,
++    d2d_color_management_impl_Release,
++    d2d_color_management_impl_Initialize,
++    d2d_color_management_impl_PrepareForRender,
++    d2d_effect_impl_SetGraph,
  };
  
 -static HRESULT __stdcall color_management_factory(IUnknown **effect)
@@ -2123,23 +3512,17 @@ index c298aeca93d..7e7d3314546 100644
      {
 -        .source_rendering_intent = D2D1_COLORMANAGEMENT_RENDERING_INTENT_PERCEPTUAL,
 -        .destination_rendering_intent = D2D1_COLORMANAGEMENT_RENDERING_INTENT_PERCEPTUAL,
--        .alpha_mode = D2D1_COLORMANAGEMENT_ALPHA_MODE_PREMULTIPLIED,
--        .quality = D2D1_COLORMANAGEMENT_QUALITY_NORMAL,
-+        .source = {NULL},
-+        .sourceRenderingIntent = 0,
-+        .destination = {NULL},
-+        .destinationRenderingIntent = 0,
-+        .alpha_mode = 0,
-+        .quality = 0
++        .source_intent = D2D1_COLORMANAGEMENT_RENDERING_INTENT_PERCEPTUAL,
++        .destination_intent = D2D1_COLORMANAGEMENT_RENDERING_INTENT_PERCEPTUAL,
+         .alpha_mode = D2D1_COLORMANAGEMENT_ALPHA_MODE_PREMULTIPLIED,
+         .quality = D2D1_COLORMANAGEMENT_QUALITY_NORMAL,
      };
-     return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++    return d2d_effect_create_impl_vtbl(effect, &d2d_color_management_impl_vtbl, &properties, sizeof(properties));
  }
  
-+
  void d2d_effects_init_builtins(struct d2d_factory *factory)
- {
-     static const struct builtin_description
-@@ -1938,10 +3355,20 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+@@ -1938,10 +3994,20 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
          { &CLSID_D2D1Crop, X2(crop) },
          { &CLSID_D2D1Shadow, X2(shadow) },
          { &CLSID_D2D1Grayscale, X(grayscale) },
@@ -2160,7 +3543,7 @@ index c298aeca93d..7e7d3314546 100644
          { &CLSID_D2D1ArithmeticComposite, X2(arithmetic_composite) },
          { &CLSID_D2D1Blend, X2(blend) },
          { &CLSID_D2D1Brightness, X2(brightness) },
-@@ -1949,9 +3376,8 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+@@ -1949,9 +4015,8 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
          { &CLSID_D2D1HueRotation, X2(hue_rotation) },
          { &CLSID_D2D1Saturation, X2(saturation) },
          { &CLSID_D2D1Scale, X2(scale) },
@@ -2171,7 +3554,7 @@ index c298aeca93d..7e7d3314546 100644
  #undef X2
  #undef X
      };
-@@ -2302,6 +3728,43 @@ HRESULT d2d_effect_property_get_uint32_value(const struct d2d_effect_properties
+@@ -2302,6 +4367,43 @@ HRESULT d2d_effect_property_get_uint32_value(const struct d2d_effect_properties
              (BYTE *)value, sizeof(*value));
  }
  
@@ -2215,7 +3598,7 @@ index c298aeca93d..7e7d3314546 100644
  static HRESULT d2d_effect_property_set_value(struct d2d_effect_properties *properties,
          struct d2d_effect_property *prop, D2D1_PROPERTY_TYPE type, const BYTE *value, UINT32 size)
  {
-@@ -2311,6 +3774,17 @@ static HRESULT d2d_effect_property_set_value(struct d2d_effect_properties *prope
+@@ -2311,6 +4413,17 @@ static HRESULT d2d_effect_property_set_value(struct d2d_effect_properties *prope
      if (prop->get_function && !prop->set_function) return E_INVALIDARG;
      if (prop->index < 0x80000000 && !prop->set_function) return E_INVALIDARG;
  
@@ -2233,7 +3616,7 @@ index c298aeca93d..7e7d3314546 100644
      if (prop->set_function)
          return prop->set_function((IUnknown *)effect->impl, value, size);
  
-@@ -2360,8 +3834,11 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_QueryInterface(ID2D1EffectCo
+@@ -2360,8 +4473,11 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_QueryInterface(ID2D1EffectCo
  {
      TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
  
@@ -2247,7 +3630,7 @@ index c298aeca93d..7e7d3314546 100644
      {
          ID2D1EffectContext_AddRef(iface);
          *out = iface;
-@@ -2423,17 +3900,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
+@@ -2423,17 +4539,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_GetMaximumSupportedFeatureLevel(ID2D1EffectContext *iface,
          const D3D_FEATURE_LEVEL *levels, UINT32 level_count, D3D_FEATURE_LEVEL *max_level)
  {
@@ -2294,7 +3677,7 @@ index c298aeca93d..7e7d3314546 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateBlendTransform(ID2D1EffectContext *iface,
-@@ -2740,6 +4242,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
+@@ -2740,6 +4881,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
      if (effect->graph)
          ID2D1TransformGraph_Release(&effect->graph->ID2D1TransformGraph_iface);
      d2d_effect_properties_cleanup(&effect->properties);
@@ -2303,7 +3686,7 @@ index c298aeca93d..7e7d3314546 100644
      if (effect->impl)
          ID2D1EffectImpl_Release(effect->impl);
  }
-@@ -2968,7 +4472,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
+@@ -2968,7 +5111,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
  
          if (SUCCEEDED(hr = d2d_transform_graph_create(count, &effect->graph)))
          {
@@ -2312,7 +3695,7 @@ index c298aeca93d..7e7d3314546 100644
                  WARN("Failed to set a new transform graph, hr %#lx.\n", hr);
          }
      }
-@@ -3366,7 +4870,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
+@@ -3366,7 +5509,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
      TRACE("iface %p refcount %lu.\n", iface, refcount);
  
      if (!refcount)
@@ -2323,7 +3706,7 @@ index c298aeca93d..7e7d3314546 100644
  
      return refcount;
  }
-@@ -3376,7 +4883,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
+@@ -3376,7 +5522,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
  {
      FIXME("iface %p, index %u stub.\n", iface, index);
  
@@ -2332,7 +3715,7 @@ index c298aeca93d..7e7d3314546 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *iface,
-@@ -3384,7 +4891,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
+@@ -3384,7 +5530,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
  {
      FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
  
@@ -2341,7 +3724,7 @@ index c298aeca93d..7e7d3314546 100644
  }
  
  static void STDMETHODCALLTYPE d2d_draw_info_SetCached(ID2D1DrawInfo *iface, BOOL is_cached)
-@@ -3401,9 +4908,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
+@@ -3401,9 +5547,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetPixelShaderConstantBuffer(ID2D1DrawInfo *iface,
          const BYTE *buffer, UINT32 size)
  {
@@ -2374,7 +3757,7 @@ index c298aeca93d..7e7d3314546 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
-@@ -3526,14 +5054,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3526,14 +5693,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          }
          else
          {
@@ -2405,7 +3788,7 @@ index c298aeca93d..7e7d3314546 100644
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect)
  {
-@@ -3543,11 +5085,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3543,11 +5724,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -2503,7 +3886,7 @@ index c298aeca93d..7e7d3314546 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3564,6 +5191,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3564,6 +5830,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      object->ID2D1Image_iface.lpVtbl = &d2d_effect_image_vtbl;
      object->refcount = 1;
      object->effect_context = effect_context;
@@ -2511,7 +3894,7 @@ index c298aeca93d..7e7d3314546 100644
  
      /* Create properties */
      d2d_effect_duplicate_properties(object, &object->properties, reg->properties);
-@@ -3589,8 +5217,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3589,8 +5856,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -2528,7 +3911,7 @@ index c298aeca93d..7e7d3314546 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +5239,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +5878,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  
