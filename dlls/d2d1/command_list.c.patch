@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/command_list.c b/dlls/d2d1/command_list.c
-index 6c830d2660e..f70012171b5 100644
+index 6c830d2660e..8852026f1d3 100644
 --- a/dlls/d2d1/command_list.c
 +++ b/dlls/d2d1/command_list.c
 @@ -18,6 +18,13 @@
@@ -267,7 +267,7 @@ index 6c830d2660e..f70012171b5 100644
 +        hr = ID2D1SimplifiedGeometrySink_Close(sink);
 +    }
 +
-+    if (SUCCEEDED(hr) && SUCCEEDED(hr = d2d_polyline_set_stroke(&path, stroke_width, style, stroke_transform,
++    if (SUCCEEDED(hr) && SUCCEEDED(hr = d2d_polyline_set_stroke(&path, stroke_width, stroke_style, stroke_transform,
 +            D2D1_DEFAULT_FLATTENING_TOLERANCE, &outline)))
 +    {
 +        d2d_polyline_set_get_bounds(&outline, &bounds);

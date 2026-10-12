@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..7a561e3a3ac 100644
+index ba6cea78e06..6ea0cfadd5d 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
 @@ -23,6 +23,7 @@
@@ -57,7 +57,7 @@ index ba6cea78e06..7a561e3a3ac 100644
 +HRESULT d2d_polyline_set_add_geometry(struct d2d_polyline_set *set, ID2D1Geometry *geometry,
 +        const D2D1_MATRIX_3X2_F *transform, float tolerance);
 +HRESULT d2d_polyline_set_stroke(const struct d2d_polyline_set *path, float width,
-+        const D2D1_STROKE_STYLE_PROPERTIES1 *style, const D2D1_MATRIX_3X2_F *transform,
++        ID2D1StrokeStyle *stroke_style, const D2D1_MATRIX_3X2_F *transform,
 +        float tolerance, struct d2d_polyline_set *out);
 +bool d2d_polyline_set_is_rect(const struct d2d_polyline_set *set, D2D1_RECT_F *rect);
 +void d2d_polyline_set_get_bounds(const struct d2d_polyline_set *set, D2D1_RECT_F *bounds);

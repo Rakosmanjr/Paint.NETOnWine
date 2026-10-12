@@ -1,9 +1,9 @@
 diff --git a/dlls/d2d1/rasterizer.c b/dlls/d2d1/rasterizer.c
 new file mode 100644
-index 00000000000..b7210dd3d70
+index 00000000000..59354bfe638
 --- /dev/null
 +++ b/dlls/d2d1/rasterizer.c
-@@ -0,0 +1,975 @@
+@@ -0,0 +1,1145 @@
 +/*
 + * Copyright 2026 James Rakos
 + *
@@ -352,6 +352,8 @@ index 00000000000..b7210dd3d70
 +{
 +    struct d2d_polyline_set *out;
 +    const D2D1_STROKE_STYLE_PROPERTIES1 *style;
++    const float *dashes;
++    UINT32 dash_count;
 +    const D2D1_MATRIX_3X2_F *transform;
 +    float half_width;
 +    /* Flattening tolerance in the output space. */
@@ -559,7 +561,9 @@ index 00000000000..b7210dd3d70
 +            && (d2d_stroke_end(stroke), true);
 +}
 +
-+static bool d2d_stroke_add_polyline(struct d2d_stroke *stroke, const D2D1_POINT_2F *src, size_t src_count, bool closed)
++/* An open polyline takes "start_cap" and "end_cap" at its ends. */
++static bool d2d_stroke_add_polyline(struct d2d_stroke *stroke, const D2D1_POINT_2F *src, size_t src_count,
++        bool closed, D2D1_CAP_STYLE start_cap, D2D1_CAP_STYLE end_cap)
 +{
 +    D2D1_POINT_2F *points, d, d_prev = {0.0f, 0.0f}, d_first = {0.0f, 0.0f}, n;
 +    size_t i, count = 0;
@@ -583,13 +587,13 @@ index 00000000000..b7210dd3d70
 +    {
 +        /* A dot has no direction. A round cap is a disc regardless, and a
 +         * square cap is taken to be axis-aligned. */
-+        if (stroke->style->startCap == D2D1_CAP_STYLE_ROUND)
++        if (start_cap == D2D1_CAP_STYLE_ROUND)
 +        {
 +            ret = d2d_stroke_begin(stroke)
 +                    && d2d_stroke_add_arc(stroke, &points[0], 0.0f, 2.0f * M_PI)
 +                    && (d2d_stroke_end(stroke), true);
 +        }
-+        else if (stroke->style->startCap == D2D1_CAP_STYLE_SQUARE)
++        else if (start_cap == D2D1_CAP_STYLE_SQUARE)
 +        {
 +            d2d_point_set(&d, 1.0f, 0.0f);
 +            ret = d2d_stroke_add_cap(stroke, D2D1_CAP_STYLE_SQUARE, &points[0], &d);
@@ -629,7 +633,7 @@ index 00000000000..b7210dd3d70
 +        else
 +        {
 +            d_first = d;
-+            if (!closed && !d2d_stroke_add_cap(stroke, stroke->style->startCap, p0, &d))
++            if (!closed && !d2d_stroke_add_cap(stroke, start_cap, p0, &d))
 +                goto done;
 +        }
 +        d_prev = d;
@@ -640,11 +644,169 @@ index 00000000000..b7210dd3d70
 +    else
 +    {
 +        d2d_point_set(&d, -d_prev.x, -d_prev.y);
-+        ret = d2d_stroke_add_cap(stroke, stroke->style->endCap, &points[count - 1], &d);
++        ret = d2d_stroke_add_cap(stroke, end_cap, &points[count - 1], &d);
 +    }
 +
 +done:
 +    free(points);
++    return ret;
++}
++
++struct d2d_dash
++{
++    D2D1_POINT_2F *points;
++    size_t count, size;
++};
++
++static bool d2d_dash_add_point(struct d2d_dash *dash, const D2D1_POINT_2F *p)
++{
++    if (!d2d_array_reserve((void **)&dash->points, &dash->size, dash->count + 1, sizeof(*dash->points)))
++        return false;
++    dash->points[dash->count++] = *p;
++    return true;
++}
++
++/* Strokes one dash. A dash of no length is drawn as its two caps, facing
++ * along "d", so that a flat cap leaves nothing. */
++static bool d2d_stroke_add_dash(struct d2d_stroke *stroke, const struct d2d_dash *dash,
++        const D2D1_POINT_2F *d, D2D1_CAP_STYLE start_cap, D2D1_CAP_STYLE end_cap)
++{
++    D2D1_POINT_2F back;
++    size_t i;
++
++    for (i = 1; i < dash->count; ++i)
++    {
++        if (dash->points[i].x != dash->points[0].x || dash->points[i].y != dash->points[0].y)
++            return d2d_stroke_add_polyline(stroke, dash->points, dash->count, false, start_cap, end_cap);
++    }
++
++    d2d_point_set(&back, -d->x, -d->y);
++    return d2d_stroke_add_cap(stroke, start_cap, &dash->points[0], d)
++            && d2d_stroke_add_cap(stroke, end_cap, &dash->points[0], &back);
++}
++
++/* Strokes the dashes of a polyline. The pattern is in units of the stroke
++ * width; a pattern with an odd number of entries repeats with "on" and
++ * "off" swapped. It starts afresh on each figure, at "dashOffset" into the
++ * pattern. Dashes take the dash cap, except at the ends of an open figure,
++ * which keep the figure's own caps. On a closed figure, a dash running
++ * through the start point is one dash. */
++static bool d2d_stroke_add_dashed_polyline(struct d2d_stroke *stroke, const D2D1_POINT_2F *points,
++        size_t count, bool closed)
++{
++    const D2D1_STROKE_STYLE_PROPERTIES1 *style = stroke->style;
++    float width = stroke->half_width * 2.0f, period = 0.0f, pos, remaining, l, t;
++    D2D1_POINT_2F d = {1.0f, 0.0f}, first_d = {1.0f, 0.0f}, q;
++    struct d2d_dash dash = {0}, first = {0};
++    unsigned int i, index, pattern_count;
++    bool on, at_start, ret = false;
++    D2D1_CAP_STYLE start_cap;
++    size_t s;
++
++    pattern_count = stroke->dash_count & 1 ? stroke->dash_count * 2 : stroke->dash_count;
++    for (i = 0; i < pattern_count; ++i)
++        period += stroke->dashes[i % stroke->dash_count] * width;
++    if (!(period > 0.0f))
++        return d2d_stroke_add_polyline(stroke, points, count, closed, style->startCap, style->endCap);
++
++    pos = fmodf(style->dashOffset * width, period);
++    if (pos < 0.0f)
++        pos += period;
++    for (index = 0;; index = (index + 1) % pattern_count)
++    {
++        remaining = stroke->dashes[index % stroke->dash_count] * width;
++        if (pos < remaining || (!pos && !remaining))
++            break;
++        pos -= remaining;
++    }
++    remaining -= pos;
++    on = !(index & 1);
++    at_start = on;
++    if (on && !d2d_dash_add_point(&dash, &points[0]))
++        goto done;
++
++    for (s = 0; s + 1 < count || (closed && s < count); ++s)
++    {
++        const D2D1_POINT_2F *p0 = &points[s], *p1 = &points[(s + 1) % count];
++
++        d2d_point_subtract(&d, p1, p0);
++        if (!(l = sqrtf(d2d_point_dot(&d, &d))))
++            continue;
++        d.x /= l;
++        d.y /= l;
++
++        /* A change at the end of a segment is made at the start of the
++         * next one, so a dash reaching the end of an open figure keeps
++         * the end cap. */
++        for (t = 0.0f; remaining < l - t;)
++        {
++            t += remaining;
++            d2d_point_set(&q, p0->x + d.x * t, p0->y + d.y * t);
++            if (on)
++            {
++                if (!d2d_dash_add_point(&dash, &q))
++                    goto done;
++                if (at_start && closed)
++                {
++                    /* Kept, to be joined to a dash that runs to the end. */
++                    first = dash;
++                    first_d = d;
++                    memset(&dash, 0, sizeof(dash));
++                }
++                else
++                {
++                    start_cap = at_start ? style->startCap : style->dashCap;
++                    if (!d2d_stroke_add_dash(stroke, &dash, &d, start_cap, style->dashCap))
++                        goto done;
++                    dash.count = 0;
++                }
++                at_start = false;
++            }
++            index = (index + 1) % pattern_count;
++            remaining = stroke->dashes[index % stroke->dash_count] * width;
++            on = !on;
++            if (on && !d2d_dash_add_point(&dash, &q))
++                goto done;
++        }
++        remaining -= l - t;
++        if (on && !d2d_dash_add_point(&dash, p1))
++            goto done;
++    }
++
++    /* A dash ending exactly at the start of a closed figure is not joined
++     * to the first one. */
++    if (on && closed && !remaining && !at_start)
++    {
++        if (!d2d_stroke_add_dash(stroke, &dash, &d, style->dashCap, style->dashCap))
++            goto done;
++        on = false;
++    }
++    if (on)
++    {
++        if (at_start)
++        {
++            /* The pattern stays on for the whole figure. */
++            ret = d2d_stroke_add_polyline(stroke, points, count, closed, style->startCap, style->endCap);
++            goto done;
++        }
++        for (s = 1; s < first.count; ++s)
++        {
++            if (!d2d_dash_add_point(&dash, &first.points[s]))
++                goto done;
++        }
++        if (first.count)
++            d = first_d;
++        first.count = 0;
++        if (!d2d_stroke_add_dash(stroke, &dash, &d, style->dashCap, closed ? style->dashCap : style->endCap))
++            goto done;
++    }
++    if (first.count && !d2d_stroke_add_dash(stroke, &first, &first_d, style->dashCap, style->dashCap))
++        goto done;
++    ret = true;
++
++done:
++    free(first.points);
++    free(dash.points);
 +    return ret;
 +}
 +
@@ -653,10 +815,12 @@ index 00000000000..b7210dd3d70
 + * space the stroke width applies in, and the result is transformed into
 + * the space it is rasterized in, where "tolerance" applies. */
 +HRESULT d2d_polyline_set_stroke(const struct d2d_polyline_set *path, float width,
-+        const D2D1_STROKE_STYLE_PROPERTIES1 *style, const D2D1_MATRIX_3X2_F *transform,
++        ID2D1StrokeStyle *stroke_style, const D2D1_MATRIX_3X2_F *transform,
 +        float tolerance, struct d2d_polyline_set *out)
 +{
++    const struct d2d_stroke_style *style_impl = unsafe_impl_from_ID2D1StrokeStyle(stroke_style);
 +    struct d2d_stroke stroke;
++    bool dashed;
 +    size_t i;
 +
 +    out->fill_mode = D2D1_FILL_MODE_WINDING;
@@ -664,16 +828,22 @@ index 00000000000..b7210dd3d70
 +        return S_OK;
 +
 +    stroke.out = out;
-+    stroke.style = style;
++    stroke.style = d2d_stroke_style_properties(stroke_style);
++    stroke.dashes = style_impl ? style_impl->dashes : NULL;
++    stroke.dash_count = style_impl ? style_impl->dash_count : 0;
 +    stroke.transform = transform;
 +    stroke.half_width = width * 0.5f;
 +    stroke.tolerance = tolerance;
 +
++    dashed = stroke.style->dashStyle != D2D1_DASH_STYLE_SOLID && stroke.dash_count;
 +    for (i = 0; i < path->line_count; ++i)
 +    {
 +        const struct d2d_polyline *line = &path->lines[i];
++        const D2D1_POINT_2F *points = &path->points[line->start];
 +
-+        if (!d2d_stroke_add_polyline(&stroke, &path->points[line->start], line->count, line->closed))
++        if (!(dashed ? d2d_stroke_add_dashed_polyline(&stroke, points, line->count, line->closed)
++                : d2d_stroke_add_polyline(&stroke, points, line->count, line->closed,
++                stroke.style->startCap, stroke.style->endCap)))
 +            return FAILED(out->hr) ? out->hr : E_OUTOFMEMORY;
 +    }
 +
