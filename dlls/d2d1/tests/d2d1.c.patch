@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..7f884e420c9 100644
+index 94aa4586184..a4b28d39ac7 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -18,6 +18,7 @@
@@ -1808,7 +1808,7 @@ index 94aa4586184..7f884e420c9 100644
 +            effect_set_enum_prop(effect, D2D1_COLORMANAGEMENT_PROP_QUALITY, D2D1_COLORMANAGEMENT_QUALITY_NORMAL);
 +            hr = render_effect_pixel(context, effect, effect, pixels[bt2020_tests[i].pixel],
 +                    DXGI_FORMAT_R32G32B32A32_FLOAT, out);
-+            todo_wine ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
++            ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +
 +            effect_set_enum_prop(effect, D2D1_COLORMANAGEMENT_PROP_QUALITY, D2D1_COLORMANAGEMENT_QUALITY_BEST);
 +            hr = render_effect_pixel(context, effect, effect, pixels[bt2020_tests[i].pixel],
@@ -5372,13 +5372,13 @@ index 94aa4586184..7f884e420c9 100644
 +    ID2D1DeviceContext_FillRectangle(context, &bounds, (ID2D1Brush *)brush);
 +    tag1 = tag2 = 0xdead;
 +    hr = ID2D1DeviceContext_EndDraw(context, &tag1, &tag2);
-+    todo_wine ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
-+    todo_wine ok(tag1 == 1 && tag2 == 2, "Got unexpected tags %s:%s.\n",
++    ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
++    ok(tag1 == 1 && tag2 == 2, "Got unexpected tags %s:%s.\n",
 +            wine_dbgstr_longlong(tag1), wine_dbgstr_longlong(tag2));
 +    check_prepare_calls(effect, 1, D2D1_CHANGE_TYPE_GRAPH);
 +    get_surface_readback(&ctx, &rb);
 +    colour = get_readback_colour(&rb, 0, 0);
-+    todo_wine ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx.\n", colour);
++    ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx.\n", colour);
 +    release_resource_readback(&rb);
 +
 +    /* The change stays pending, so the next draw asks again. Flush() reports
@@ -5389,8 +5389,8 @@ index 94aa4586184..7f884e420c9 100644
 +    ID2D1DeviceContext_SetTags(context, 3, 4);
 +    tag1 = tag2 = 0xdead;
 +    hr = ID2D1DeviceContext_Flush(context, &tag1, &tag2);
-+    todo_wine ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
-+    todo_wine ok(tag1 == 1 && tag2 == 2, "Got unexpected tags %s:%s.\n",
++    ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
++    ok(tag1 == 1 && tag2 == 2, "Got unexpected tags %s:%s.\n",
 +            wine_dbgstr_longlong(tag1), wine_dbgstr_longlong(tag2));
 +    ID2D1DeviceContext_FillRectangle(context, &bounds, (ID2D1Brush *)brush);
 +    tag1 = tag2 = 0xdead;
@@ -5405,7 +5405,7 @@ index 94aa4586184..7f884e420c9 100644
 +
 +    /* Measuring the image reports the failure too. */
 +    hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
-+    todo_wine ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
++    ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
 +    check_prepare_calls(effect, 3, (D2D1_CHANGE_TYPE_GRAPH << 2 | D2D1_CHANGE_TYPE_GRAPH) << 2
 +            | D2D1_CHANGE_TYPE_GRAPH);
 +
