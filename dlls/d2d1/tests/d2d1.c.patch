@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..679047bf1da 100644
+index 94aa4586184..a38b2b9e3af 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -18,6 +18,7 @@
@@ -2282,7 +2282,7 @@ index 94aa4586184..679047bf1da 100644
      DWORD pixel;
      HRESULT hr;
  
-@@ -16680,1617 +18496,6005 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16680,1617 +18496,6139 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
          return;
  
      context = ctx.context;
@@ -4795,6 +4795,140 @@ index 94aa4586184..679047bf1da 100644
 +    ID2D1Bitmap1_Release(bitmap);
 +    ID2D1SolidColorBrush_Release(brush);
 +    ID2D1CommandList_Release(command_list);
++    release_test_context(&ctx);
++}
++
++/* An effect drawn with a world transform shows its output transformed, the
++ * same as an image drawn directly, whatever its input is. */
++static void test_effect_scaled_draw(BOOL d3d11)
++{
++    static const struct
++    {
++        unsigned int x, y;
++        DWORD expected;
++    }
++    points[] =
++    {
++        {8, 8, 0x00000000},
++        {12, 12, 0xffff0000},
++        {40, 12, 0xffff0000},
++        {12, 40, 0xffff0000},
++        {40, 40, 0xffff0000},
++        {44, 44, 0x00000000},
++        {44, 12, 0x00000000},
++        {12, 44, 0x00000000},
++    };
++    static const DWORD red = 0xffff0000;
++    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
++    ID2D1CommandList *command_list;
++    ID2D1Image *target, *output, *input;
++    D2D1_MATRIX_3X2_F matrix;
++    ID2D1SolidColorBrush *brush;
++    struct d2d1_test_context ctx;
++    struct resource_readback rb;
++    ID2D1DeviceContext *context;
++    D2D1_COLOR_F colour_f;
++    unsigned int i, j;
++    ID2D1Bitmap1 *bitmap;
++    ID2D1Effect *effect;
++    DWORD pixels[16 * 16];
++    D2D1_RECT_F rect;
++    D2D1_SIZE_U size;
++    DWORD colour;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++    context = ctx.context;
++    if (!ctx.factory1)
++    {
++        win_skip("ID2D1Factory1 is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    for (i = 0; i < ARRAY_SIZE(pixels); ++i)
++        pixels[i] = red;
++    set_size_u(&size, 16, 16);
++    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
++    bitmap_desc.dpiX = 96.0f;
++    bitmap_desc.dpiY = 96.0f;
++    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
++    bitmap_desc.colorContext = NULL;
++    hr = ID2D1DeviceContext_CreateBitmap(context, size, pixels, sizeof(*pixels) * 16, &bitmap_desc, &bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    /* A 16x16 square at the origin, recorded with a transform of its own. */
++    hr = ID2D1DeviceContext_CreateCommandList(context, &command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1DeviceContext_GetTarget(context, &target);
++    ID2D1DeviceContext_SetTarget(context, (ID2D1Image *)command_list);
++    ID2D1DeviceContext_BeginDraw(context);
++    set_color(&colour_f, 1.0f, 0.0f, 0.0f, 1.0f);
++    hr = ID2D1DeviceContext_CreateSolidColorBrush(context, &colour_f, NULL, &brush);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    set_matrix_identity(&matrix);
++    translate_matrix(&matrix, 0.0f, 4.0f);
++    ID2D1DeviceContext_SetTransform(context, &matrix);
++    set_rect(&rect, 0.0f, -4.0f, 16.0f, 12.0f);
++    ID2D1DeviceContext_FillRectangle(context, &rect, (ID2D1Brush *)brush);
++    hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1DeviceContext_SetTarget(context, target);
++    if (target)
++        ID2D1Image_Release(target);
++    hr = ID2D1CommandList_Close(command_list);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Opacity, &effect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    for (i = 0; i < 4; ++i)
++    {
++        winetest_push_context("Test %u", i);
++
++        input = i & 1 ? (ID2D1Image *)command_list : (ID2D1Image *)bitmap;
++        if (i < 2)
++        {
++            ID2D1Effect_SetInput(effect, 0, input, FALSE);
++            ID2D1Effect_GetOutput(effect, &output);
++        }
++        else
++        {
++            ID2D1Image_AddRef(output = input);
++        }
++
++        ID2D1DeviceContext_BeginDraw(context);
++        ID2D1DeviceContext_Clear(context, NULL);
++        set_matrix_identity(&matrix);
++        translate_matrix(&matrix, 10.0f, 10.0f);
++        scale_matrix(&matrix, 2.0f, 2.0f);
++        ID2D1DeviceContext_SetTransform(context, &matrix);
++        ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
++                D2D1_COMPOSITE_MODE_SOURCE_OVER);
++        set_matrix_identity(&matrix);
++        ID2D1DeviceContext_SetTransform(context, &matrix);
++        hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++        ID2D1Image_Release(output);
++
++        get_surface_readback(&ctx, &rb);
++        for (j = 0; j < ARRAY_SIZE(points); ++j)
++        {
++            colour = get_readback_colour(&rb, points[j].x, points[j].y);
++            ok(compare_colour(colour, points[j].expected, 1), "Got unexpected colour 0x%08lx at (%u, %u).\n",
++                    colour, points[j].x, points[j].y);
++        }
++        release_resource_readback(&rb);
++
++        winetest_pop_context();
++    }
++
++    ID2D1Effect_Release(effect);
++    ID2D1SolidColorBrush_Release(brush);
++    ID2D1CommandList_Release(command_list);
++    ID2D1Bitmap1_Release(bitmap);
 +    release_test_context(&ctx);
 +}
 +
@@ -9431,7 +9565,7 @@ index 94aa4586184..679047bf1da 100644
      release_test_context(&ctx);
  }
  
-@@ -18357,6 +24561,12 @@ START_TEST(d2d1)
+@@ -18357,6 +24695,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -9444,7 +9578,7 @@ index 94aa4586184..679047bf1da 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +24590,7 @@ START_TEST(d2d1)
+@@ -18380,6 +24724,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -9452,7 +9586,7 @@ index 94aa4586184..679047bf1da 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18397,8 +24608,12 @@ START_TEST(d2d1)
+@@ -18397,8 +24742,12 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_scale);
      queue_d3d10_test(test_effect_premultiply);
      queue_d3d10_test(test_effect_3d_transform);
@@ -9465,7 +9599,7 @@ index 94aa4586184..679047bf1da 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,10 +24623,33 @@ START_TEST(d2d1)
+@@ -18408,10 +24757,34 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
@@ -9489,6 +9623,7 @@ index 94aa4586184..679047bf1da 100644
 +    queue_test(test_effect_prepare_for_render_graph);
 +    queue_test(test_effect_prepare_for_render_calls);
 +    queue_test(test_effect_command_list_input);
++    queue_test(test_effect_scaled_draw);
      queue_d3d10_test(test_get_effect_properties);
      queue_test(test_effect_vertex_buffer);
      queue_d3d10_test(test_compute_geometry_area);
