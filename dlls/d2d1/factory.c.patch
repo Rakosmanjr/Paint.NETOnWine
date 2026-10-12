@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/factory.c b/dlls/d2d1/factory.c
-index 80c147638cd..6d3ec71256b 100644
+index 80c147638cd..1bee2278c66 100644
 --- a/dlls/d2d1/factory.c
 +++ b/dlls/d2d1/factory.c
 @@ -55,12 +55,16 @@ static BOOL WINAPI d2d_factory_builtins_initonce(INIT_ONCE *once, void *param, v
@@ -109,7 +109,275 @@ index 80c147638cd..6d3ec71256b 100644
      return S_OK;
  }
  
-@@ -964,6 +985,7 @@ static HRESULT d2d_factory_register_effect_from_stream(struct d2d_factory *facto
+@@ -757,11 +778,202 @@ static UINT32 parse_effect_get_property_index(struct d2d_effect_properties *prop
+     return props->custom_count;
+ }
+ 
++/* Moves to the next child element of the element the reader is on, whose
++ * earlier children must have been read to their end. Returns S_FALSE at the
++ * end of the parent. */
++static HRESULT parse_effect_next_child(IXmlReader *reader, const WCHAR **name)
++{
++    XmlNodeType node_type;
++    HRESULT hr;
++
++    while ((hr = IXmlReader_Read(reader, &node_type)) == S_OK)
++    {
++        if (node_type == XmlNodeType_EndElement)
++            return S_FALSE;
++        if (node_type == XmlNodeType_Element)
++            return IXmlReader_GetLocalName(reader, name, NULL);
++    }
++
++    return FAILED(hr) ? hr : HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
++}
++
++/* Reads to the end of the element the reader is on. */
++static HRESULT parse_effect_skip_children(IXmlReader *reader)
++{
++    const WCHAR *name;
++    HRESULT hr;
++
++    IXmlReader_MoveToElement(reader);
++    if (IXmlReader_IsEmptyElement(reader))
++        return S_OK;
++
++    while ((hr = parse_effect_next_child(reader, &name)) == S_OK)
++    {
++        if (FAILED(hr = parse_effect_skip_children(reader)))
++            return hr;
++    }
++
++    return hr == S_FALSE ? S_OK : hr;
++}
++
++static struct d2d_effect_properties *parse_effect_create_subproperties(struct d2d_effect_property *property)
++{
++    if (!property->subproperties)
++    {
++        if (!(property->subproperties = calloc(1, sizeof(*property->subproperties))))
++            return NULL;
++        d2d_effect_init_properties(NULL, property->subproperties);
++    }
++
++    return property->subproperties;
++}
++
++static struct d2d_effect_property *parse_effect_get_subproperty(const struct d2d_effect_property *property,
++        UINT32 index)
++{
++    unsigned int i;
++
++    if (!property->subproperties)
++        return NULL;
++
++    for (i = 0; i < property->subproperties->count; ++i)
++    {
++        if (property->subproperties->properties[i].index == index)
++            return &property->subproperties->properties[i];
++    }
++
++    return NULL;
++}
++
++/* "Fields" holds one string per enum value, named for the value and set to
++ * its display name, with the value itself in an "Index" subproperty. */
++static HRESULT parse_effect_fields(IXmlReader *reader, struct d2d_effect_property *property)
++{
++    WCHAR *name, *display_name, *index, buffer[16];
++    struct d2d_effect_property *fields, *field;
++    struct d2d_effect_properties *subproperties;
++    unsigned int count = 0;
++    const WCHAR *node_name;
++    HRESULT hr;
++
++    if (property->type != D2D1_PROPERTY_TYPE_ENUM || parse_effect_get_subproperty(property, D2D1_SUBPROPERTY_FIELDS))
++        return E_INVALIDARG;
++
++    if (!(subproperties = parse_effect_create_subproperties(property)))
++        return E_OUTOFMEMORY;
++    if (FAILED(hr = d2d_effect_subproperties_add(subproperties, L"Fields", D2D1_SUBPROPERTY_FIELDS,
++            D2D1_PROPERTY_TYPE_ARRAY, NULL)))
++        return hr;
++    fields = parse_effect_get_subproperty(property, D2D1_SUBPROPERTY_FIELDS);
++    if (!(subproperties = parse_effect_create_subproperties(fields)))
++        return E_OUTOFMEMORY;
++
++    if (IXmlReader_IsEmptyElement(reader))
++        return S_OK;
++
++    while ((hr = parse_effect_next_child(reader, &node_name)) == S_OK)
++    {
++        if (wcscmp(node_name, L"Field"))
++            return E_INVALIDARG;
++
++        if (FAILED(hr = parse_effect_get_attribute(reader, L"displayname", &display_name)))
++            return hr;
++        if (FAILED(hr = parse_effect_get_attribute(reader, L"index", &index)))
++        {
++            free(display_name);
++            return hr;
++        }
++        if (FAILED(parse_effect_get_attribute(reader, L"name", &name)))
++        {
++            swprintf(buffer, ARRAY_SIZE(buffer), L"%u", count);
++            if (!(name = wcsdup(buffer)))
++            {
++                free(display_name);
++                free(index);
++                return E_OUTOFMEMORY;
++            }
++        }
++
++        hr = d2d_effect_subproperties_add(subproperties, name, count, D2D1_PROPERTY_TYPE_STRING, display_name);
++        if (SUCCEEDED(hr))
++        {
++            field = &subproperties->properties[subproperties->count - 1];
++            if (!parse_effect_create_subproperties(field))
++                hr = E_OUTOFMEMORY;
++            else
++                hr = d2d_effect_subproperties_add(field->subproperties, L"Index", 0,
++                        D2D1_PROPERTY_TYPE_UINT32, index);
++        }
++        free(name);
++        free(display_name);
++        free(index);
++        if (FAILED(hr) || FAILED(hr = parse_effect_skip_children(reader)))
++            return hr;
++        ++count;
++    }
++    if (FAILED(hr))
++        return hr;
++
++    fields = parse_effect_get_subproperty(property, D2D1_SUBPROPERTY_FIELDS);
++    *(UINT32 *)(property->subproperties->data.ptr + fields->data.offset) = count;
++
++    return S_OK;
++}
++
++static HRESULT parse_effect_subproperty(IXmlReader *reader, struct d2d_effect_property *property)
++{
++    static const struct
++    {
++        const WCHAR *name;
++        UINT32 index;
++    }
++    subproperties[] =
++    {
++        {L"DisplayName", D2D1_SUBPROPERTY_DISPLAYNAME},
++        {L"Min",         D2D1_SUBPROPERTY_MIN},
++        {L"Max",         D2D1_SUBPROPERTY_MAX},
++        {L"Default",     D2D1_SUBPROPERTY_DEFAULT},
++    };
++    WCHAR *name, *value = NULL;
++    D2D1_PROPERTY_TYPE type;
++    unsigned int i;
++    HRESULT hr;
++
++    if (FAILED(hr = parse_effect_get_attribute(reader, L"name", &name)))
++        return hr;
++    for (i = 0; i < ARRAY_SIZE(subproperties); ++i)
++    {
++        if (!wcscmp(name, subproperties[i].name))
++            break;
++    }
++    free(name);
++    if (i == ARRAY_SIZE(subproperties))
++        return E_INVALIDARG;
++
++    if (FAILED(hr = parse_effect_get_property_type(reader, &type)))
++        return hr;
++    if (type != (subproperties[i].index == D2D1_SUBPROPERTY_DISPLAYNAME ? D2D1_PROPERTY_TYPE_STRING : property->type)
++            || parse_effect_get_subproperty(property, subproperties[i].index))
++        return E_INVALIDARG;
++
++    if (!parse_effect_create_subproperties(property))
++        return E_OUTOFMEMORY;
++    parse_effect_get_attribute(reader, L"value", &value);
++    hr = d2d_effect_subproperties_add(property->subproperties, subproperties[i].name,
++            subproperties[i].index, type, value);
++    free(value);
++    if (FAILED(hr))
++        return hr;
++
++    return parse_effect_skip_children(reader);
++}
++
+ static HRESULT parse_effect_property(IXmlReader *reader, struct d2d_effect_registration *effect)
+ {
++    struct d2d_effect_property *property;
+     WCHAR *name = NULL, *value = NULL;
++    const WCHAR *node_name;
+     D2D1_PROPERTY_TYPE type;
+-    unsigned int depth;
+     UINT32 index;
+     HRESULT hr;
+ 
+@@ -780,14 +992,6 @@ static HRESULT parse_effect_property(IXmlReader *reader, struct d2d_effect_regis
+ 
+     parse_effect_get_attribute(reader, L"value", &value);
+ 
+-    if (SUCCEEDED(hr))
+-    {
+-        /* FIXME: sub properties are ignored */
+-        IXmlReader_MoveToElement(reader);
+-        IXmlReader_GetDepth(reader, &depth);
+-        hr = parse_effect_skip_element(reader, depth);
+-    }
+-
+     if (SUCCEEDED(hr))
+     {
+         index = parse_effect_get_property_index(effect->properties, name);
+@@ -796,8 +1000,47 @@ static HRESULT parse_effect_property(IXmlReader *reader, struct d2d_effect_regis
+ 
+     free(value);
+     free(name);
++    if (FAILED(hr))
++        return hr;
+ 
+-    return hr;
++    property = &effect->properties->properties[effect->properties->count - 1];
++    IXmlReader_MoveToElement(reader);
++    if (index >= 0x80000000)
++        return parse_effect_skip_children(reader);
++
++    if (!IXmlReader_IsEmptyElement(reader))
++    {
++        while ((hr = parse_effect_next_child(reader, &node_name)) == S_OK)
++        {
++            if (!wcscmp(node_name, L"Property"))
++                hr = parse_effect_subproperty(reader, property);
++            else if (!wcscmp(node_name, L"Fields"))
++                hr = parse_effect_fields(reader, property);
++            else
++                hr = E_INVALIDARG;
++            if (FAILED(hr))
++                return hr;
++        }
++        if (FAILED(hr))
++            return hr;
++    }
++
++    /* The built-in effect descriptions in effect.c have no subproperties. */
++    if (effect->builtin)
++        return S_OK;
++
++    if (!parse_effect_get_subproperty(property, D2D1_SUBPROPERTY_DISPLAYNAME))
++    {
++        WARN("Property %s has no display name.\n", debugstr_w(property->name));
++        return E_INVALIDARG;
++    }
++    if (property->type == D2D1_PROPERTY_TYPE_ENUM && !parse_effect_get_subproperty(property, D2D1_SUBPROPERTY_FIELDS))
++    {
++        WARN("Enum property %s has no fields.\n", debugstr_w(property->name));
++        return E_INVALIDARG;
++    }
++
++    return S_OK;
+ }
+ 
+ static HRESULT parse_effect_inputs(IXmlReader *reader, struct d2d_effect_registration *effect)
+@@ -964,6 +1207,7 @@ static HRESULT d2d_factory_register_effect_from_stream(struct d2d_factory *facto
      unsigned int i;
      HRESULT hr;
  
@@ -117,7 +385,7 @@ index 80c147638cd..6d3ec71256b 100644
      LIST_FOR_EACH_ENTRY_REV(effect, &factory->effects, struct d2d_effect_registration, entry)
      {
          if (IsEqualGUID(effect_id, &effect->id))
-@@ -973,6 +995,7 @@ static HRESULT d2d_factory_register_effect_from_stream(struct d2d_factory *facto
+@@ -973,6 +1217,7 @@ static HRESULT d2d_factory_register_effect_from_stream(struct d2d_factory *facto
              return S_OK;
          }
      }
@@ -125,7 +393,29 @@ index 80c147638cd..6d3ec71256b 100644
  
      if (FAILED(hr = CreateXmlReader(&IID_IXmlReader, (void **)&reader, NULL)))
          return hr;
-@@ -1114,6 +1137,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_UnregisterEffect(ID2D1Factory7 *ifa
+@@ -1034,6 +1279,21 @@ static HRESULT d2d_factory_register_effect_from_stream(struct d2d_factory *facto
+         property->set_function = bindings[i].setFunction;
+     }
+ 
++    /* Whether a custom property can be set depends on its binding. */
++    for (i = 0; i < effect->properties->count; ++i)
++    {
++        struct d2d_effect_property *property = &effect->properties->properties[i];
++
++        if (!property->subproperties || property->index >= 0x80000000)
++            continue;
++        if (FAILED(hr = d2d_effect_subproperties_add(property->subproperties, L"IsReadOnly",
++                D2D1_SUBPROPERTY_ISREADONLY, D2D1_PROPERTY_TYPE_BOOL, property->set_function ? L"false" : L"true")))
++        {
++            d2d_effect_registration_cleanup(effect);
++            return hr;
++        }
++    }
++
+     effect->registration_count = 1;
+     effect->id = *effect_id;
+     effect->factory = effect_factory;
+@@ -1114,6 +1374,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_UnregisterEffect(ID2D1Factory7 *ifa
  
      d2d_factory_init_builtin_effects(factory);
  
@@ -133,7 +423,7 @@ index 80c147638cd..6d3ec71256b 100644
      LIST_FOR_EACH_ENTRY_REV(effect, &factory->effects, struct d2d_effect_registration, entry)
      {
          if (IsEqualGUID(effect_id, &effect->id))
-@@ -1124,9 +1148,11 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_UnregisterEffect(ID2D1Factory7 *ifa
+@@ -1124,9 +1385,11 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_UnregisterEffect(ID2D1Factory7 *ifa
                  list_remove(&effect->entry);
                  d2d_effect_registration_cleanup(effect);
              }
@@ -145,7 +435,7 @@ index 80c147638cd..6d3ec71256b 100644
  
      return D2DERR_EFFECT_IS_NOT_REGISTERED;
  }
-@@ -1149,6 +1175,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetRegisteredEffects(ID2D1Factory7
+@@ -1149,6 +1412,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetRegisteredEffects(ID2D1Factory7
  
      d2d_factory_init_builtin_effects(factory);
  
@@ -153,7 +443,7 @@ index 80c147638cd..6d3ec71256b 100644
      LIST_FOR_EACH_ENTRY(effect, &factory->effects, struct d2d_effect_registration, entry)
      {
          if (effects && effect_count)
-@@ -1161,6 +1188,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetRegisteredEffects(ID2D1Factory7
+@@ -1161,6 +1425,7 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetRegisteredEffects(ID2D1Factory7
  
          *registered += 1;
      }
@@ -161,7 +451,7 @@ index 80c147638cd..6d3ec71256b 100644
  
      if (!effects) return S_OK;
      return *returned == *registered ? S_OK : D2DERR_INSUFFICIENT_BUFFER;
-@@ -1179,7 +1207,94 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetEffectProperties(ID2D1Factory7 *
+@@ -1179,7 +1444,94 @@ static HRESULT STDMETHODCALLTYPE d2d_factory_GetEffectProperties(ID2D1Factory7 *
      if (!(reg = d2d_factory_get_registered_effect((ID2D1Factory *)iface, effect_id)))
      {
          WARN("Effect id %s not found.\n", wine_dbgstr_guid(effect_id));
@@ -257,7 +547,7 @@ index 80c147638cd..6d3ec71256b 100644
      }
  
      *props = &reg->properties->ID2D1Properties_iface;
-@@ -1296,6 +1411,19 @@ static BOOL STDMETHODCALLTYPE d2d_factory_mt_GetMultithreadProtected(ID2D1Multit
+@@ -1296,6 +1648,19 @@ static BOOL STDMETHODCALLTYPE d2d_factory_mt_GetMultithreadProtected(ID2D1Multit
      return TRUE;
  }
  
@@ -277,7 +567,7 @@ index 80c147638cd..6d3ec71256b 100644
  static void STDMETHODCALLTYPE d2d_factory_mt_Enter(ID2D1Multithread *iface)
  {
      struct d2d_factory *factory = impl_from_ID2D1Multithread(iface);
-@@ -1358,9 +1486,9 @@ static void d2d_factory_init(struct d2d_factory *factory, D2D1_FACTORY_TYPE fact
+@@ -1358,9 +1723,9 @@ static void d2d_factory_init(struct d2d_factory *factory, D2D1_FACTORY_TYPE fact
              &d2d_factory_multithread_noop_vtbl : &d2d_factory_multithread_vtbl;
      factory->factory_type = factory_type;
      factory->refcount = 1;
