@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..4d9d0753472 100644
+index c298aeca93d..7b8c4d89fc9 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -113,16 +113,46 @@ index c298aeca93d..4d9d0753472 100644
  static HRESULT STDMETHODCALLTYPE d2d_offset_transform_QueryInterface(ID2D1OffsetTransform *iface,
          REFIID iid, void **out)
  {
-@@ -397,7 +494,7 @@ static HRESULT STDMETHODCALLTYPE d2d_border_transform_SetOutputBuffer(
+@@ -273,12 +370,24 @@ static UINT32 STDMETHODCALLTYPE d2d_blend_transform_GetInputCount(ID2D1BlendTran
+     return transform->input_count;
+ }
+ 
++static HRESULT d2d_transform_set_output_buffer(D2D1_BUFFER_PRECISION precision, D2D1_CHANNEL_DEPTH depth)
++{
++    if ((unsigned int)precision > D2D1_BUFFER_PRECISION_32BPC_FLOAT
++            || (depth != D2D1_CHANNEL_DEPTH_DEFAULT && depth != D2D1_CHANNEL_DEPTH_1 && depth != D2D1_CHANNEL_DEPTH_4))
++        return E_INVALIDARG;
++
++    if (precision != D2D1_BUFFER_PRECISION_UNKNOWN || depth != D2D1_CHANNEL_DEPTH_DEFAULT)
++        FIXME("Ignoring output buffer precision %u, depth %u.\n", precision, depth);
++
++    return S_OK;
++}
++
+ static HRESULT STDMETHODCALLTYPE d2d_blend_transform_SetOutputBuffer(ID2D1BlendTransform *iface,
+         D2D1_BUFFER_PRECISION precision, D2D1_CHANNEL_DEPTH depth)
  {
-     FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
+-    FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
++    TRACE("iface %p, precision %u, depth %u.\n", iface, precision, depth);
  
 -    return E_NOTIMPL;
-+    return S_OK;
++    return d2d_transform_set_output_buffer(precision, depth);
+ }
+ 
+ static void STDMETHODCALLTYPE d2d_blend_transform_SetCached(ID2D1BlendTransform *iface,
+@@ -395,9 +504,9 @@ static UINT32 STDMETHODCALLTYPE d2d_border_transform_GetInputCount(ID2D1BorderTr
+ static HRESULT STDMETHODCALLTYPE d2d_border_transform_SetOutputBuffer(
+         ID2D1BorderTransform *iface, D2D1_BUFFER_PRECISION precision, D2D1_CHANNEL_DEPTH depth)
+ {
+-    FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
++    TRACE("iface %p, precision %u, depth %u.\n", iface, precision, depth);
+ 
+-    return E_NOTIMPL;
++    return d2d_transform_set_output_buffer(precision, depth);
  }
  
  static void STDMETHODCALLTYPE d2d_border_transform_SetCached(
-@@ -599,6 +696,90 @@ static HRESULT d2d_bounds_adjustment_transform_create(const D2D1_RECT_L *rect,
+@@ -599,6 +708,90 @@ static HRESULT d2d_bounds_adjustment_transform_create(const D2D1_RECT_L *rect,
      return S_OK;
  }
  
@@ -213,7 +243,7 @@ index c298aeca93d..4d9d0753472 100644
  static struct d2d_transform_node * d2d_transform_graph_get_node(const struct d2d_transform_graph *graph,
          ID2D1TransformNode *object)
  {
-@@ -621,11 +802,15 @@ static HRESULT d2d_transform_graph_add_node(struct d2d_transform_graph *graph,
+@@ -621,11 +814,15 @@ static HRESULT d2d_transform_graph_add_node(struct d2d_transform_graph *graph,
      if (!(node = calloc(1, sizeof(*node))))
          return E_OUTOFMEMORY;
      node->input_count = ID2D1TransformNode_GetInputCount(object);
@@ -230,7 +260,7 @@ index c298aeca93d..4d9d0753472 100644
  
      node->object = object;
      ID2D1TransformNode_AddRef(node->object);
-@@ -655,17 +840,9 @@ static void d2d_transform_node_disconnect(struct d2d_transform_node *node)
+@@ -655,17 +852,9 @@ static void d2d_transform_node_disconnect(struct d2d_transform_node *node)
  static void d2d_transform_graph_delete_node(struct d2d_transform_graph *graph,
          struct d2d_transform_node *node)
  {
@@ -248,7 +278,7 @@ index c298aeca93d..4d9d0753472 100644
      if (graph->output == node)
          graph->output = NULL;
  
-@@ -730,7 +907,6 @@ static ULONG STDMETHODCALLTYPE d2d_transform_graph_Release(ID2D1TransformGraph *
+@@ -730,7 +919,6 @@ static ULONG STDMETHODCALLTYPE d2d_transform_graph_Release(ID2D1TransformGraph *
      if (!refcount)
      {
          d2d_transform_graph_clear(graph);
@@ -256,7 +286,7 @@ index c298aeca93d..4d9d0753472 100644
          free(graph);
      }
  
-@@ -765,13 +941,13 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_SetSingleTransformNode(ID2D
+@@ -765,13 +953,13 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_SetSingleTransformNode(ID2D
  
      input_count = ID2D1TransformNode_GetInputCount(object);
      if (graph->input_count != input_count)
@@ -274,7 +304,7 @@ index c298aeca93d..4d9d0753472 100644
  
      return S_OK;
  }
-@@ -839,7 +1015,10 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_ConnectNode(ID2D1TransformG
+@@ -839,7 +1027,10 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_ConnectNode(ID2D1TransformG
          return E_INVALIDARG;
  
      d2d_transform_node_disconnect(from);
@@ -285,7 +315,7 @@ index c298aeca93d..4d9d0753472 100644
      from->output = to;
  
      return S_OK;
-@@ -864,9 +1043,11 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_ConnectToEffectInput(ID2D1T
+@@ -864,9 +1055,11 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_ConnectToEffectInput(ID2D1T
      if (node_index >= count)
          return E_INVALIDARG;
  
@@ -300,7 +330,7 @@ index c298aeca93d..4d9d0753472 100644
  
      return S_OK;
  }
-@@ -889,8 +1070,8 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_SetPassthroughGraph(ID2D1Tr
+@@ -889,8 +1082,8 @@ static HRESULT STDMETHODCALLTYPE d2d_transform_graph_SetPassthroughGraph(ID2D1Tr
      if (index >= graph->input_count)
          return E_INVALIDARG;
  
@@ -311,7 +341,7 @@ index c298aeca93d..4d9d0753472 100644
      graph->passthrough = true;
      graph->passthrough_input = index;
  
-@@ -923,12 +1104,6 @@ static HRESULT d2d_transform_graph_create(UINT32 input_count, struct d2d_transfo
+@@ -923,12 +1116,6 @@ static HRESULT d2d_transform_graph_create(UINT32 input_count, struct d2d_transfo
      object->ID2D1TransformGraph_iface.lpVtbl = &d2d_transform_graph_vtbl;
      object->refcount = 1;
      list_init(&object->nodes);
@@ -324,7 +354,7 @@ index c298aeca93d..4d9d0753472 100644
      object->input_count = input_count;
  
      *graph = object;
-@@ -936,11 +1111,41 @@ static HRESULT d2d_transform_graph_create(UINT32 input_count, struct d2d_transfo
+@@ -936,11 +1123,41 @@ static HRESULT d2d_transform_graph_create(UINT32 input_count, struct d2d_transfo
      return S_OK;
  }
  
@@ -366,7 +396,7 @@ index c298aeca93d..4d9d0753472 100644
      /* Followed by properties block, its size and format depends on particular effect. */
  };
  
-@@ -978,137 +1183,421 @@ static ULONG STDMETHODCALLTYPE d2d_effect_impl_Release(ID2D1EffectImpl *iface)
+@@ -978,130 +1195,414 @@ static ULONG STDMETHODCALLTYPE d2d_effect_impl_Release(ID2D1EffectImpl *iface)
      LONG refcount = InterlockedDecrement(&effect->refcount);
  
      if (!refcount)
@@ -595,13 +625,6 @@ index c298aeca93d..4d9d0753472 100644
 +                (const BYTE *)(transform->impl + 1), transform->cb_size);
  
 -static const WCHAR _2d_affine_transform_description[] =
--L"<?xml version='1.0'?>                                                      \
--  <Effect>                                                                   \
--    <Property name='DisplayName' type='string' value='2D Affine Transform'/> \
--    <Property name='Author'      type='string' value='The Wine Project'/>    \
--    <Property name='Category'    type='string' value='Stub'/>                \
--    <Property name='Description' type='string' value='2D Affine Transform'/> \
--    <Inputs>                                                                 \
 +    return hr;
 +}
 +
@@ -865,60 +888,23 @@ index c298aeca93d..4d9d0753472 100644
 +#define BINDING_RW(name, prop) name##_##prop##_set, name##_##prop##_get
 +
 +static const WCHAR _2d_affine_transform_description[] =
-+L"<?xml version='1.0'?>                                                      \
-+  <Effect>                                                                   \
-+    <Property name='DisplayName' type='string' value='2D Affine Transform'/> \
-+    <Property name='Author'      type='string' value='The Wine Project'/>    \
-+    <Property name='Category'    type='string' value='Stub'/>                \
-+    <Property name='Description' type='string' value='2D Affine Transform'/> \
-+    <Inputs>                                                                 \
-       <Input name='Source'/>                                                 \
-     </Inputs>                                                                \
-     <Property name='InterpolationMode' type='enum' />                        \
-@@ -1277,53 +1766,216 @@ static const D2D1_PROPERTY_BINDING crop_bindings[] =
+ L"<?xml version='1.0'?>                                                      \
+   <Effect>                                                                   \
+     <Property name='DisplayName' type='string' value='2D Affine Transform'/> \
+@@ -1277,79 +1778,789 @@ static const D2D1_PROPERTY_BINDING crop_bindings[] =
      { L"BorderMode", BINDING_RW(crop, border_mode) },
  };
  
 -static HRESULT __stdcall crop_factory(IUnknown **effect)
-+
-+/* Crop changes the region rather than the pixels, so it needs no shader --
-+ * only a rect mapping. The properties live in the implementation object's
-+ * trailing block and are read on each call, so a later SetValue() is picked
-+ * up without rebuilding anything. */
-+struct d2d_crop_transform
- {
+-{
 -    static const struct crop_properties properties =
-+    ID2D1Transform ID2D1Transform_iface;
-+    LONG refcount;
-+    struct d2d_effect_impl *impl;
-+};
-+
-+static inline struct d2d_crop_transform *impl_from_crop_ID2D1Transform(ID2D1Transform *iface)
-+{
-+    return CONTAINING_RECORD(iface, struct d2d_crop_transform, ID2D1Transform_iface);
-+}
-+
-+static HRESULT STDMETHODCALLTYPE d2d_crop_transform_QueryInterface(ID2D1Transform *iface,
-+        REFIID iid, void **out)
-+{
-+    if (IsEqualGUID(iid, &IID_ID2D1Transform)
-+            || IsEqualGUID(iid, &IID_ID2D1TransformNode)
-+            || IsEqualGUID(iid, &IID_IUnknown))
-     {
+-    {
 -        .rect = { -INFINITY, -INFINITY, INFINITY, INFINITY },
 -        .border_mode = D2D1_BORDER_MODE_SOFT,
 -    };
 -    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
-+        *out = iface;
-+        ID2D1Transform_AddRef(iface);
-+        return S_OK;
-+    }
-+
-+    WARN("Unsupported interface %s.\n", debugstr_guid(iid));
-+    *out = NULL;
-+    return E_NOINTERFACE;
- }
- 
+-}
+-
 -static const WCHAR shadow_description[] =
 -L"<?xml version='1.0'?>                                                   \
 -  <Effect>                                                                \
@@ -933,47 +919,101 @@ index c298aeca93d..4d9d0753472 100644
 -    <Property name='Color' type='vector4' />                              \
 -    <Property name='Optimization' type='enum' />                          \
 -  </Effect>";
-+static ULONG STDMETHODCALLTYPE d2d_crop_transform_AddRef(ID2D1Transform *iface)
-+{
-+    return InterlockedIncrement(&impl_from_crop_ID2D1Transform(iface)->refcount);
-+}
  
 -struct shadow_properties
-+static ULONG STDMETHODCALLTYPE d2d_crop_transform_Release(ID2D1Transform *iface)
++/* Crop changes the region rather than the pixels, so it needs no shader --
++ * only a rect mapping. The properties live in the implementation object's
++ * trailing block and are read on each call, so a later SetValue() is picked
++ * up without rebuilding anything. */
++struct d2d_crop_transform
  {
 -    float blur_standard_deviation;
 -    D2D_VECTOR_4F color;
 -    D2D1_SHADOW_OPTIMIZATION optimization;
--};
-+    struct d2d_crop_transform *transform = impl_from_crop_ID2D1Transform(iface);
-+    ULONG refcount = InterlockedDecrement(&transform->refcount);
++    ID2D1Transform ID2D1Transform_iface;
++    LONG refcount;
++    struct d2d_effect_impl *impl;
+ };
  
 -EFFECT_PROPERTY_RW(shadow, blur_standard_deviation, FLOAT)
 -EFFECT_PROPERTY_RW(shadow, color, VECTOR4)
 -EFFECT_PROPERTY_RW(shadow, optimization, ENUM)
-+    if (!refcount)
-+        free(transform);
- 
+-
 -static const D2D1_PROPERTY_BINDING shadow_bindings[] =
-+    return refcount;
-+}
-+
-+static UINT32 STDMETHODCALLTYPE d2d_crop_transform_GetInputCount(ID2D1Transform *iface)
++static inline struct d2d_crop_transform *impl_from_crop_ID2D1Transform(ID2D1Transform *iface)
  {
 -    { L"BlurStandardDeviation", BINDING_RW(shadow, blur_standard_deviation) },
 -    { L"Color", BINDING_RW(shadow, color) },
 -    { L"Optimization", BINDING_RW(shadow, optimization) },
 -};
-+    return 1;
++    return CONTAINING_RECORD(iface, struct d2d_crop_transform, ID2D1Transform_iface);
 +}
  
 -static HRESULT __stdcall shadow_factory(IUnknown **effect)
++static HRESULT STDMETHODCALLTYPE d2d_crop_transform_QueryInterface(ID2D1Transform *iface,
++        REFIID iid, void **out)
+ {
+-    static const struct shadow_properties properties =
++    if (IsEqualGUID(iid, &IID_ID2D1Transform)
++            || IsEqualGUID(iid, &IID_ID2D1TransformNode)
++            || IsEqualGUID(iid, &IID_IUnknown))
+     {
+-        .blur_standard_deviation = 3.0f,
+-        .color = { 0.0f, 0.0f, 0.0f, 1.0f },
+-        .optimization = D2D1_SHADOW_OPTIMIZATION_BALANCED,
+-    };
+-    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
+-}
++        *out = iface;
++        ID2D1Transform_AddRef(iface);
++        return S_OK;
++    }
+ 
+-static const WCHAR grayscale_description[] =
+-L"<?xml version='1.0'?>                                                   \
+-  <Effect>                                                                \
+-    <Property name='DisplayName' type='string' value='Grayscale'/>        \
+-    <Property name='Author'      type='string' value='The Wine Project'/> \
+-    <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Grayscale'/>        \
+-    <Inputs >                                                             \
+-      <Input name='Source'/>                                              \
+-    </Inputs>                                                             \
+-  </Effect>";
++    WARN("Unsupported interface %s.\n", debugstr_guid(iid));
++    *out = NULL;
++    return E_NOINTERFACE;
++}
+ 
+-static HRESULT __stdcall grayscale_factory(IUnknown **effect)
++static ULONG STDMETHODCALLTYPE d2d_crop_transform_AddRef(ID2D1Transform *iface)
+ {
+-    return d2d_effect_create_impl(effect, NULL, 0);
++    return InterlockedIncrement(&impl_from_crop_ID2D1Transform(iface)->refcount);
+ }
+ 
+-static const WCHAR color_matrix_description[] =
+-L"<?xml version='1.0'?>                                                   \
++static ULONG STDMETHODCALLTYPE d2d_crop_transform_Release(ID2D1Transform *iface)
++{
++    struct d2d_crop_transform *transform = impl_from_crop_ID2D1Transform(iface);
++    ULONG refcount = InterlockedDecrement(&transform->refcount);
++
++    if (!refcount)
++        free(transform);
++
++    return refcount;
++}
++
++static UINT32 STDMETHODCALLTYPE d2d_crop_transform_GetInputCount(ID2D1Transform *iface)
++{
++    return 1;
++}
++
 +/* The rect is in DIPs and may be infinite in any direction, so clamp rather
 + * than convert directly: converting an infinity to LONG is undefined. */
 +static void d2d_crop_transform_get_rect(struct d2d_crop_transform *transform, D2D1_RECT_L *rect)
- {
--    static const struct shadow_properties properties =
--    {
++{
 +    const struct crop_properties *props = (const struct crop_properties *)(transform->impl + 1);
 +
 +    rect->left = props->rect.x <= (float)LONG_MIN ? LONG_MIN :
@@ -1125,14 +1165,27 @@ index c298aeca93d..4d9d0753472 100644
 +{
 +    static const struct shadow_properties properties =
 +    {
-         .blur_standard_deviation = 3.0f,
-         .color = { 0.0f, 0.0f, 0.0f, 1.0f },
-         .optimization = D2D1_SHADOW_OPTIMIZATION_BALANCED,
-@@ -1345,7 +1997,554 @@ L"<?xml version='1.0'?>                                                   \
- 
- static HRESULT __stdcall grayscale_factory(IUnknown **effect)
- {
--    return d2d_effect_create_impl(effect, NULL, 0);
++        .blur_standard_deviation = 3.0f,
++        .color = { 0.0f, 0.0f, 0.0f, 1.0f },
++        .optimization = D2D1_SHADOW_OPTIMIZATION_BALANCED,
++    };
++    return d2d_effect_create_impl(effect, &properties, sizeof(properties));
++}
++
++static const WCHAR grayscale_description[] =
++L"<?xml version='1.0'?>                                                   \
++  <Effect>                                                                \
++    <Property name='DisplayName' type='string' value='Grayscale'/>        \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
++    <Property name='Description' type='string' value='Grayscale'/>        \
++    <Inputs >                                                             \
++      <Input name='Source'/>                                              \
++    </Inputs>                                                             \
++  </Effect>";
++
++static HRESULT __stdcall grayscale_factory(IUnknown **effect)
++{
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_grayscale_impl_vtbl, NULL, 0);
 +}
 +
@@ -1681,10 +1734,14 @@ index c298aeca93d..4d9d0753472 100644
 +        .direction = 0.0f,
 +    };
 +    return d2d_effect_create_impl_vtbl(effect, &d2d_emboss_impl_vtbl, &properties, sizeof(properties));
- }
- 
- static const WCHAR color_matrix_description[] =
-@@ -1381,6 +2580,54 @@ static const D2D1_PROPERTY_BINDING color_matrix_bindings[] =
++}
++
++static const WCHAR color_matrix_description[] =
++L"<?xml version='1.0'?>                                                   \
+   <Effect>                                                                \
+     <Property name='DisplayName' type='string' value='Color Matrix'/>     \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+@@ -1381,6 +2592,54 @@ static const D2D1_PROPERTY_BINDING color_matrix_bindings[] =
      { L"ClampOutput", BINDING_RW(color_matrix, clamp_output) },
  };
  
@@ -1739,7 +1796,7 @@ index c298aeca93d..4d9d0753472 100644
  static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
  {
      static const struct color_matrix_properties properties =
-@@ -1388,7 +2635,58 @@ static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
+@@ -1388,7 +2647,58 @@ static HRESULT __stdcall color_matrix_factory(IUnknown **effect)
          .color_matrix = { ._11 = 1.0f, ._22 = 1.0f, ._33 = 1.0f, ._44 = 1.0f },
          .alpha_mode = D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED,
      };
@@ -1799,7 +1856,7 @@ index c298aeca93d..4d9d0753472 100644
  }
  
  static const WCHAR flood_description[] =
-@@ -1415,22 +2713,125 @@ static const D2D1_PROPERTY_BINDING flood_bindings[] =
+@@ -1415,22 +2725,125 @@ static const D2D1_PROPERTY_BINDING flood_bindings[] =
      { L"Color", BINDING_RW(flood, color) },
  };
  
@@ -1929,7 +1986,7 @@ index c298aeca93d..4d9d0753472 100644
      <Inputs>                                                              \
        <Input name='Source'/>                                              \
      </Inputs>                                                             \
-@@ -1439,27 +2840,27 @@ L"<?xml version='1.0'?>                                                   \
+@@ -1439,27 +2852,27 @@ L"<?xml version='1.0'?>                                                   \
      <Property name='BorderMode' type='enum' />                            \
    </Effect>";
  
@@ -1967,7 +2024,7 @@ index c298aeca93d..4d9d0753472 100644
      {
          .standard_deviation = 3.0f,
          .optimization = D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED,
-@@ -1468,6 +2869,7 @@ static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
+@@ -1468,6 +2881,7 @@ static HRESULT __stdcall gaussian_blur_factory(IUnknown **effect)
      return d2d_effect_create_impl(effect, &properties, sizeof(properties));
  }
  
@@ -1975,7 +2032,7 @@ index c298aeca93d..4d9d0753472 100644
  static const WCHAR point_specular_description[] =
  L"<?xml version='1.0'?>                                                   \
    <Effect>                                                                \
-@@ -1736,186 +3138,847 @@ struct saturation_properties
+@@ -1736,186 +3150,847 @@ struct saturation_properties
      float saturation;
  };
  
@@ -2893,8 +2950,7 @@ index c298aeca93d..4d9d0753472 100644
 +    for (i = 0; i < 3; ++i)
 +        for (j = 0; j < 3; ++j)
 +            c->matrix[i][j] = m[i][j];
- 
--struct color_management_properties
++
 +    c->source_pq = source.pq;
 +    c->destination_pq = destination.pq;
 +    c->clamp_source = source.clamp;
@@ -2905,7 +2961,8 @@ index c298aeca93d..4d9d0753472 100644
 +
 +    return d2d_effect_impl_PrepareForRender(iface, type);
 +}
-+
+ 
+-struct color_management_properties
 +static ULONG STDMETHODCALLTYPE d2d_color_management_impl_Release(ID2D1EffectImpl *iface)
  {
 -    ID2D1ColorContext *source_color_context;
@@ -2917,7 +2974,11 @@ index c298aeca93d..4d9d0753472 100644
 -};
 +    struct color_management_effect_properties *props = color_management_props((IUnknown *)iface);
 +    struct d2d_effect_impl *effect = impl_from_ID2D1EffectImpl(iface);
-+
+ 
+-EFFECT_PROPERTY_RW(color_management, source_rendering_intent, ENUM)
+-EFFECT_PROPERTY_RW(color_management, destination_rendering_intent, ENUM)
+-EFFECT_PROPERTY_RW(color_management, alpha_mode, ENUM)
+-EFFECT_PROPERTY_RW(color_management, quality, ENUM)
 +    if (effect->refcount == 1)
 +    {
 +        if (props->source)
@@ -2926,11 +2987,7 @@ index c298aeca93d..4d9d0753472 100644
 +            ID2D1ColorContext_Release(props->destination);
 +        props->source = props->destination = NULL;
 +    }
- 
--EFFECT_PROPERTY_RW(color_management, source_rendering_intent, ENUM)
--EFFECT_PROPERTY_RW(color_management, destination_rendering_intent, ENUM)
--EFFECT_PROPERTY_RW(color_management, alpha_mode, ENUM)
--EFFECT_PROPERTY_RW(color_management, quality, ENUM)
++
 +    return d2d_effect_impl_Release(iface);
 +}
  
@@ -2967,7 +3024,7 @@ index c298aeca93d..4d9d0753472 100644
  }
  
  void d2d_effects_init_builtins(struct d2d_factory *factory)
-@@ -1938,10 +4001,20 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+@@ -1938,10 +4013,20 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
          { &CLSID_D2D1Crop, X2(crop) },
          { &CLSID_D2D1Shadow, X2(shadow) },
          { &CLSID_D2D1Grayscale, X(grayscale) },
@@ -2988,7 +3045,7 @@ index c298aeca93d..4d9d0753472 100644
          { &CLSID_D2D1ArithmeticComposite, X2(arithmetic_composite) },
          { &CLSID_D2D1Blend, X2(blend) },
          { &CLSID_D2D1Brightness, X2(brightness) },
-@@ -1949,9 +4022,8 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
+@@ -1949,9 +4034,8 @@ void d2d_effects_init_builtins(struct d2d_factory *factory)
          { &CLSID_D2D1HueRotation, X2(hue_rotation) },
          { &CLSID_D2D1Saturation, X2(saturation) },
          { &CLSID_D2D1Scale, X2(scale) },
@@ -2999,7 +3056,7 @@ index c298aeca93d..4d9d0753472 100644
  #undef X2
  #undef X
      };
-@@ -2302,6 +4374,43 @@ HRESULT d2d_effect_property_get_uint32_value(const struct d2d_effect_properties
+@@ -2302,6 +4386,43 @@ HRESULT d2d_effect_property_get_uint32_value(const struct d2d_effect_properties
              (BYTE *)value, sizeof(*value));
  }
  
@@ -3043,7 +3100,7 @@ index c298aeca93d..4d9d0753472 100644
  static HRESULT d2d_effect_property_set_value(struct d2d_effect_properties *properties,
          struct d2d_effect_property *prop, D2D1_PROPERTY_TYPE type, const BYTE *value, UINT32 size)
  {
-@@ -2311,6 +4420,17 @@ static HRESULT d2d_effect_property_set_value(struct d2d_effect_properties *prope
+@@ -2311,6 +4432,17 @@ static HRESULT d2d_effect_property_set_value(struct d2d_effect_properties *prope
      if (prop->get_function && !prop->set_function) return E_INVALIDARG;
      if (prop->index < 0x80000000 && !prop->set_function) return E_INVALIDARG;
  
@@ -3061,7 +3118,7 @@ index c298aeca93d..4d9d0753472 100644
      if (prop->set_function)
          return prop->set_function((IUnknown *)effect->impl, value, size);
  
-@@ -2360,8 +4480,11 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_QueryInterface(ID2D1EffectCo
+@@ -2360,8 +4492,11 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_QueryInterface(ID2D1EffectCo
  {
      TRACE("iface %p, iid %s, out %p.\n", iface, debugstr_guid(iid), out);
  
@@ -3075,7 +3132,7 @@ index c298aeca93d..4d9d0753472 100644
      {
          ID2D1EffectContext_AddRef(iface);
          *out = iface;
-@@ -2423,17 +4546,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
+@@ -2423,17 +4558,42 @@ static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateEffect(ID2D1EffectCont
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_GetMaximumSupportedFeatureLevel(ID2D1EffectContext *iface,
          const D3D_FEATURE_LEVEL *levels, UINT32 level_count, D3D_FEATURE_LEVEL *max_level)
  {
@@ -3122,7 +3179,7 @@ index c298aeca93d..4d9d0753472 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateBlendTransform(ID2D1EffectContext *iface,
-@@ -2737,9 +4885,17 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
+@@ -2737,9 +4897,17 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
      }
      free(effect->inputs);
      ID2D1EffectContext_Release(&effect->effect_context->ID2D1EffectContext_iface);
@@ -3140,7 +3197,7 @@ index c298aeca93d..4d9d0753472 100644
      if (effect->impl)
          ID2D1EffectImpl_Release(effect->impl);
  }
-@@ -2968,7 +5124,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
+@@ -2968,7 +5136,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
  
          if (SUCCEEDED(hr = d2d_transform_graph_create(count, &effect->graph)))
          {
@@ -3149,7 +3206,7 @@ index c298aeca93d..4d9d0753472 100644
                  WARN("Failed to set a new transform graph, hr %#lx.\n", hr);
          }
      }
-@@ -3366,17 +5522,59 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
+@@ -3366,25 +5534,67 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
      TRACE("iface %p refcount %lu.\n", iface, refcount);
  
      if (!refcount)
@@ -3211,16 +3268,17 @@ index c298aeca93d..4d9d0753472 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *iface,
-@@ -3384,7 +5582,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
+         D2D1_BUFFER_PRECISION precision, D2D1_CHANNEL_DEPTH depth)
  {
-     FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
+-    FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
++    TRACE("iface %p, precision %u, depth %u.\n", iface, precision, depth);
  
 -    return E_NOTIMPL;
-+    return S_OK;
++    return d2d_transform_set_output_buffer(precision, depth);
  }
  
  static void STDMETHODCALLTYPE d2d_draw_info_SetCached(ID2D1DrawInfo *iface, BOOL is_cached)
-@@ -3401,9 +5599,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
+@@ -3401,9 +5611,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetPixelShaderConstantBuffer(ID2D1DrawInfo *iface,
          const BYTE *buffer, UINT32 size)
  {
@@ -3253,7 +3311,7 @@ index c298aeca93d..4d9d0753472 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
-@@ -3461,15 +5680,24 @@ static const ID2D1DrawInfoVtbl d2d_draw_info_vtbl =
+@@ -3461,15 +5692,24 @@ static const ID2D1DrawInfoVtbl d2d_draw_info_vtbl =
      d2d_draw_info_SetVertexProcessing,
  };
  
@@ -3279,7 +3337,7 @@ index c298aeca93d..4d9d0753472 100644
  
      *obj = object;
  
-@@ -3499,7 +5727,10 @@ static bool d2d_transform_node_needs_render_info(const struct d2d_transform_node
+@@ -3499,7 +5739,10 @@ static bool d2d_transform_node_needs_render_info(const struct d2d_transform_node
      return false;
  }
  
@@ -3291,7 +3349,7 @@ index c298aeca93d..4d9d0753472 100644
  {
      ID2D1DrawTransform *draw_transform;
      struct d2d_transform_node *node;
-@@ -3507,9 +5738,13 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3507,9 +5750,13 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
  
      LIST_FOR_EACH_ENTRY(node, &graph->nodes, struct d2d_transform_node, entry)
      {
@@ -3306,7 +3364,7 @@ index c298aeca93d..4d9d0753472 100644
                  return hr;
          }
  
-@@ -3526,14 +5761,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3526,14 +5773,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          }
          else
          {
@@ -3337,7 +3395,7 @@ index c298aeca93d..4d9d0753472 100644
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect)
  {
-@@ -3543,11 +5792,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3543,11 +5804,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -3435,7 +3493,7 @@ index c298aeca93d..4d9d0753472 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3564,6 +5898,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3564,6 +5910,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      object->ID2D1Image_iface.lpVtbl = &d2d_effect_image_vtbl;
      object->refcount = 1;
      object->effect_context = effect_context;
@@ -3443,7 +3501,7 @@ index c298aeca93d..4d9d0753472 100644
  
      /* Create properties */
      d2d_effect_duplicate_properties(object, &object->properties, reg->properties);
-@@ -3589,8 +5924,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3589,8 +5936,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -3460,7 +3518,7 @@ index c298aeca93d..4d9d0753472 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +5946,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +5958,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  

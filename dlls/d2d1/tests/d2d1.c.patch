@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..6561c1390b8 100644
+index 94aa4586184..802447a6b92 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -18,6 +18,7 @@
@@ -2449,59 +2449,58 @@ index 94aa4586184..6561c1390b8 100644
              blend_desc->sourceBlend, expected->sourceBlend);
      ok_(__FILE__, line)(blend_desc->destinationBlend == expected->destinationBlend,
              "Got unexpected destination blend %u, expected %u.\n",
-@@ -15015,6 +16673,19 @@ static void test_blend_transform(BOOL d3d11)
+@@ -15010,13 +16668,19 @@ static void test_blend_transform(BOOL d3d11)
+ 
+     /* Set output buffer */
+     hr = ID2D1BlendTransform_SetOutputBuffer(transform, 0xdeadbeef, D2D1_CHANNEL_DEPTH_DEFAULT);
+-    todo_wine
+     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
      hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 0xdeadbeef);
-     todo_wine
+-    todo_wine
      ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_32BPC_FLOAT + 1,
 +            D2D1_CHANNEL_DEPTH_DEFAULT);
-+    todo_wine
 +    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 2);
-+    todo_wine
 +    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_32BPC_FLOAT, D2D1_CHANNEL_DEPTH_4);
-+    todo_wine
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_8BPC_UNORM, D2D1_CHANNEL_DEPTH_1);
-+    todo_wine
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      hr = ID2D1BlendTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
-     todo_wine
+-    todo_wine
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-@@ -15113,8 +16784,18 @@ static void test_border_transform(BOOL d3d11)
-     hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 0xdeadbeef);
-     todo_wine
+ 
+     /* Set description */
+@@ -15108,13 +16772,19 @@ static void test_border_transform(BOOL d3d11)
+ 
+     /* Set output buffer */
+     hr = ID2D1BorderTransform_SetOutputBuffer(transform, 0xdeadbeef, D2D1_CHANNEL_DEPTH_DEFAULT);
+-    todo_wine
      ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
--    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
+     hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 0xdeadbeef);
+-    todo_wine
+     ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_32BPC_FLOAT + 1,
 +            D2D1_CHANNEL_DEPTH_DEFAULT);
-+    todo_wine
 +    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, 2);
-     todo_wine
 +    ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_32BPC_FLOAT, D2D1_CHANNEL_DEPTH_4);
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_8BPC_UNORM, D2D1_CHANNEL_DEPTH_1);
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-+    hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
+     hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
+-    todo_wine
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      /* Set extend mode */
-@@ -16638,1659 +18319,7177 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
+@@ -16638,1659 +18308,7177 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
      ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
  }
  
 -static void test_effect_custom_pixel_shader(BOOL d3d11)
-+/* A transform whose output is larger than its input, so that the shader
-+ * samples where the input image does not exist. */
-+#define EFFECT_INPUT_BOUNDS_EXPAND 8
-+
-+static HRESULT STDMETHODCALLTYPE effect_impl_expand_transform_MapOutputRectToInputRects(
-+        ID2D1DrawTransform *iface, const D2D1_RECT_L *output_rect, D2D1_RECT_L *input_rects,
-+        UINT32 input_rect_count)
- {
+-{
 -    static const WCHAR *description =
 -        L"<?xml version='1.0'?>                                                       \
 -            <Effect>                                                                  \
@@ -2517,18 +2516,21 @@ index 94aa4586184..6561c1390b8 100644
 -                </Property>                                                           \
 -            </Effect>                                                                 \
 -        ";
-+    if (input_rect_count != 1)
-+        return E_INVALIDARG;
++/* A transform whose output is larger than its input, so that the shader
++ * samples where the input image does not exist. */
++#define EFFECT_INPUT_BOUNDS_EXPAND 8
  
 -    static const char ps_code[] =
 -        "float4 main() : sv_target\n"
 -        "{\n"
 -        "    return float4(0.1, 0.2, 0.3, 0.4);\n"
 -        "}";
-+    /* Ask for the whole output region, more than the input covers. */
-+    input_rects[0] = *output_rect;
-+    return S_OK;
-+}
++static HRESULT STDMETHODCALLTYPE effect_impl_expand_transform_MapOutputRectToInputRects(
++        ID2D1DrawTransform *iface, const D2D1_RECT_L *output_rect, D2D1_RECT_L *input_rects,
++        UINT32 input_rect_count)
++{
++    if (input_rect_count != 1)
++        return E_INVALIDARG;
  
 -    D2D1_PROPERTY_BINDING bindings[1] = { 0 };
 -    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
@@ -2543,20 +2545,19 @@ index 94aa4586184..6561c1390b8 100644
 -    ID2D1Image *output;
 -    DWORD pixel;
 -    HRESULT hr;
++    /* Ask for the whole output region, more than the input covers. */
++    input_rects[0] = *output_rect;
++    return S_OK;
++}
+ 
+-    if (!init_test_context(&ctx, d3d11))
+-        return;
 +static HRESULT STDMETHODCALLTYPE effect_impl_expand_transform_MapInputRectsToOutputRect(
 +        ID2D1DrawTransform *iface, const D2D1_RECT_L *input_rects, const D2D1_RECT_L *input_opaque_rects,
 +        UINT32 input_rect_count, D2D1_RECT_L *output_rect, D2D1_RECT_L *output_opaque_rect)
 +{
 +    if (input_rect_count != 1)
 +        return E_INVALIDARG;
- 
--    if (!init_test_context(&ctx, d3d11))
--        return;
-+    output_rect->left = input_rects[0].left - EFFECT_INPUT_BOUNDS_EXPAND;
-+    output_rect->top = input_rects[0].top - EFFECT_INPUT_BOUNDS_EXPAND;
-+    output_rect->right = input_rects[0].right + EFFECT_INPUT_BOUNDS_EXPAND;
-+    output_rect->bottom = input_rects[0].bottom + EFFECT_INPUT_BOUNDS_EXPAND;
-+    memset(output_opaque_rect, 0, sizeof(*output_opaque_rect));
  
 -    context = ctx.context;
 -    factory = ctx.factory1;
@@ -2566,10 +2567,21 @@ index 94aa4586184..6561c1390b8 100644
 -        release_test_context(&ctx);
 -        return;
 -    }
++    output_rect->left = input_rects[0].left - EFFECT_INPUT_BOUNDS_EXPAND;
++    output_rect->top = input_rects[0].top - EFFECT_INPUT_BOUNDS_EXPAND;
++    output_rect->right = input_rects[0].right + EFFECT_INPUT_BOUNDS_EXPAND;
++    output_rect->bottom = input_rects[0].bottom + EFFECT_INPUT_BOUNDS_EXPAND;
++    memset(output_opaque_rect, 0, sizeof(*output_opaque_rect));
+ 
+-    preload_shader("ps_4_0", ps_code, &GUID_TestPixelShader, &ctx);
 +    return S_OK;
 +}
  
--    preload_shader("ps_4_0", ps_code, &GUID_TestPixelShader, &ctx);
+-    bindings[0].propertyName = L"Context";
+-    bindings[0].getFunction = effect_impl_get_context;
+-    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, description, bindings,
+-            ARRAY_SIZE(bindings), custom_effect_impl_create);
+-    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +static const ID2D1DrawTransformVtbl effect_impl_expand_transform_vtbl =
 +{
 +    effect_impl_draw_transform_QueryInterface,
@@ -2582,19 +2594,11 @@ index 94aa4586184..6561c1390b8 100644
 +    effect_impl_draw_transform_SetDrawInfo,
 +};
  
--    bindings[0].propertyName = L"Context";
--    bindings[0].getFunction = effect_impl_get_context;
--    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, description, bindings,
--            ARRAY_SIZE(bindings), custom_effect_impl_create);
+-    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
 -    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +static HRESULT STDMETHODCALLTYPE expand_effect_impl_create(IUnknown **effect_impl)
 +{
 +    struct effect_impl *object;
- 
--    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
--    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-+    if (!(object = calloc(1, sizeof(*object))))
-+        return E_OUTOFMEMORY;
  
 -    set_size_u(&input_size, 1, 1);
 -    pixel = 0xabcd00ff;
@@ -2607,14 +2611,16 @@ index 94aa4586184..6561c1390b8 100644
 -    hr = ID2D1DeviceContext_CreateBitmap(context, input_size, &pixel, sizeof(pixel),
 -            &bitmap_desc, &bitmap);
 -    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    if (!(object = calloc(1, sizeof(*object))))
++        return E_OUTOFMEMORY;
+ 
+-    ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
+-    ID2D1Effect_GetOutput(effect, &output);
 +    object->ID2D1EffectImpl_iface.lpVtbl = &custom_effect_impl_vtbl;
 +    object->ID2D1DrawTransform_iface.lpVtbl = &effect_impl_expand_transform_vtbl;
 +    object->refcount = 1;
 +    object->pixel_shader = &GUID_TestSampleShader;
  
--    ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
--    ID2D1Effect_GetOutput(effect, &output);
--
 -    ID2D1DeviceContext_BeginDraw(context);
 -    ID2D1DeviceContext_Clear(context, 0);
 -    ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
@@ -3510,8 +3516,17 @@ index 94aa4586184..6561c1390b8 100644
 +    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 -    ok(compare_float(area, 8.0f, 0), "Unexpected value %.8e.\n", area);
+-
+-    skew_matrix(&matrix, 0.1f, 1.5f);
+-    hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, &matrix, 200.0f, &area);
 +    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Flood, &flood);
-+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+-    ok(compare_float(area, 6.8f, 0), "Unexpected value %.8e.\n", area);
+-
+-    ID2D1RectangleGeometry_Release(rectangle_geometry);
+-
+-    set_rect(&rect, 50.0f, 0.0f, 40.0f, 100.0f);
+-    hr = ID2D1Factory_CreateRectangleGeometry(ctx.factory, &rect, &rectangle_geometry);
 +    set_input_effect(effect, 0, flood);
 +    draw_effect_image(context, effect, NULL, NULL, S_OK);
 +    sprintf(expected, "P3;T:in%so%sx1;T:out(0,0,64,48)x1;", infinite, infinite);
@@ -3526,13 +3541,10 @@ index 94aa4586184..6561c1390b8 100644
 +    check_mapping_log(expected);
 +    ID2D1Image_Release(output);
 +    ID2D1Effect_Release(flood);
- 
--    skew_matrix(&matrix, 0.1f, 1.5f);
--    hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, &matrix, 200.0f, &area);
++
 +    /* Feeding a built-in effect. */
 +    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_D2D1Invert, &invert);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
--    ok(compare_float(area, 6.8f, 0), "Unexpected value %.8e.\n", area);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
 +    set_input_effect(invert, 0, effect);
 +    draw_effect_image(context, invert, NULL, NULL, S_OK);
@@ -3548,8 +3560,7 @@ index 94aa4586184..6561c1390b8 100644
 +    draw_effect_image(context, effect, NULL, NULL, D2DERR_INVALID_GRAPH_CONFIGURATION);
 +    check_mapping_log("");
 +    ID2D1Effect_Release(effect);
- 
--    ID2D1RectangleGeometry_Release(rectangle_geometry);
++
 +    /* A chain: every node's output is mapped before any node is asked what
 +     * it needs, and each node is asked for its own output within what its
 +     * consumer wants. */
@@ -5988,9 +5999,9 @@ index 94aa4586184..6561c1390b8 100644
 +            ok(filter_effect_hr[1] == E_INVALIDARG, "Got unexpected hr %#lx for filter 0x2.\n",
 +                    filter_effect_hr[1]);
 +            ok(filter_effect_hr[2] == S_OK, "Got unexpected hr %#lx.\n", filter_effect_hr[2]);
-+            todo_wine ok(output_buffer_hr[0] == E_INVALIDARG, "Got unexpected hr %#lx for an invalid precision.\n",
++            ok(output_buffer_hr[0] == E_INVALIDARG, "Got unexpected hr %#lx for an invalid precision.\n",
 +                    output_buffer_hr[0]);
-+            todo_wine ok(output_buffer_hr[1] == E_INVALIDARG, "Got unexpected hr %#lx for channel depth 2.\n",
++            ok(output_buffer_hr[1] == E_INVALIDARG, "Got unexpected hr %#lx for channel depth 2.\n",
 +                    output_buffer_hr[1]);
 +            ok(output_buffer_hr[2] == S_OK, "Got unexpected hr %#lx.\n", output_buffer_hr[2]);
 +            ok(output_buffer_hr[3] == S_OK, "Got unexpected hr %#lx.\n", output_buffer_hr[3]);
@@ -6637,10 +6648,12 @@ index 94aa4586184..6561c1390b8 100644
 +
 +    set_rect(&rect, 0.0f, 100.0f, 40.0f, 50.0f);
 +    hr = ID2D1Factory_CreateRectangleGeometry(ctx.factory, &rect, &rectangle_geometry);
-+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
-+
-+    hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, NULL, 1.0f, &area);
-+    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+ 
+     hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, NULL, 1.0f, &area);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+-    ok(compare_float(area, 1000.0f, 0), "Unexpected value %.8e.\n", area);
+-    ID2D1RectangleGeometry_Release(rectangle_geometry);
 +    ok(compare_float(area, 2000.0f, 0), "Unexpected value %.8e.\n", area);
 +    ID2D1RectangleGeometry_Release(rectangle_geometry);
 +
@@ -7441,23 +7454,19 @@ index 94aa4586184..6561c1390b8 100644
 +
 +    hr = ID2D1Mesh_Open(mesh, &sink);
 +    ok(hr == D2DERR_WRONG_STATE, "Got unexpected hr %#lx.\n", hr);
- 
--    set_rect(&rect, 50.0f, 0.0f, 40.0f, 100.0f);
--    hr = ID2D1Factory_CreateRectangleGeometry(ctx.factory, &rect, &rectangle_geometry);
++
 +    ID2D1Mesh_Release(mesh);
 +
 +    /* Add some triangles */
 +    hr = ID2D1RenderTarget_CreateMesh(rt, &mesh);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
- 
--    hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, NULL, 1.0f, &area);
-+    hr = ID2D1Mesh_Open(mesh, &sink);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
--    ok(compare_float(area, 1000.0f, 0), "Unexpected value %.8e.\n", area);
--    ID2D1RectangleGeometry_Release(rectangle_geometry);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
 -    set_rect(&rect, 0.0f, 100.0f, 40.0f, 50.0f);
 -    hr = ID2D1Factory_CreateRectangleGeometry(ctx.factory, &rect, &rectangle_geometry);
++    hr = ID2D1Mesh_Open(mesh, &sink);
+     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
+ 
+-    hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, NULL, 1.0f, &area);
 +    set_point(&triangles[0].point1, 0.0f, 0.0f);
 +    set_point(&triangles[0].point2, 10.0f, 20.0f);
 +    set_point(&triangles[0].point3, 40.0f, -20.0f);
@@ -7466,9 +7475,8 @@ index 94aa4586184..6561c1390b8 100644
 +    set_point(&triangles[1].point3, 50.0f, -200.0f);
 +    ID2D1TessellationSink_AddTriangles(sink, triangles, 2);
 +    hr = ID2D1TessellationSink_Close(sink);
-     ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
- 
--    hr = ID2D1RectangleGeometry_ComputeArea(rectangle_geometry, NULL, 1.0f, &area);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
 +    ID2D1TessellationSink_Release(sink);
 +
 +    ID2D1Mesh_Release(mesh);
@@ -10868,7 +10876,7 @@ index 94aa4586184..6561c1390b8 100644
      release_test_context(&ctx);
  }
  
-@@ -18357,6 +25556,12 @@ START_TEST(d2d1)
+@@ -18357,6 +25545,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -10881,7 +10889,7 @@ index 94aa4586184..6561c1390b8 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18374,12 +25579,14 @@ START_TEST(d2d1)
+@@ -18374,12 +25568,14 @@ START_TEST(d2d1)
      queue_d3d10_test(test_geometry_group);
      queue_test(test_mt_factory);
      queue_d3d10_test(test_effect_register);
@@ -10896,7 +10904,7 @@ index 94aa4586184..6561c1390b8 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18397,8 +25604,12 @@ START_TEST(d2d1)
+@@ -18397,8 +25593,12 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_scale);
      queue_d3d10_test(test_effect_premultiply);
      queue_d3d10_test(test_effect_3d_transform);
@@ -10909,7 +10917,7 @@ index 94aa4586184..6561c1390b8 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,10 +25619,37 @@ START_TEST(d2d1)
+@@ -18408,10 +25608,37 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
