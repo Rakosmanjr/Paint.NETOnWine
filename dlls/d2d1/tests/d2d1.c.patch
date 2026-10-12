@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..a38b2b9e3af 100644
+index 94aa4586184..a88e0b15622 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -18,6 +18,7 @@
@@ -10,15 +10,16 @@ index 94aa4586184..a38b2b9e3af 100644
  #include <math.h>
  #include <float.h>
  #include <stdint.h>
-@@ -36,6 +37,7 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
+@@ -36,6 +37,8 @@ DEFINE_GUID(CLSID_TestEffect2, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea
  DEFINE_GUID(CLSID_AuxEffect, 0xb9ee12e9,0x32d9,0xe659,0xac,0x61,0x2d,0x7c,0xea,0x69,0x28,0x79);
  DEFINE_GUID(GUID_TestVertexShader, 0x5bcdcfae,0x1e92,0x4dc1,0x94,0xfa,0x3b,0x01,0xca,0x54,0x59,0x20);
  DEFINE_GUID(GUID_TestPixelShader,  0x53015748,0xfc13,0x4168,0xbd,0x13,0x0f,0xcf,0x15,0x29,0x7f,0x01);
 +DEFINE_GUID(GUID_TestSampleShader, 0x53015748,0xfc13,0x4168,0xbd,0x13,0x0f,0xcf,0x15,0x29,0x7f,0x02);
++DEFINE_GUID(GUID_TestGreenShader,  0x53015748,0xfc13,0x4168,0xbd,0x13,0x0f,0xcf,0x15,0x29,0x7f,0x03);
  DEFINE_GUID(GUID_CustomVertexBuffer, 0x53015748,0xfc13,0x4168,0xbd,0x13,0x0f,0xcf,0x15,0x29,0x7f,0x02);
  
  static const D2D1_MATRIX_3X2_F identity =
-@@ -127,6 +129,15 @@ static UINT32 _effect_get_enum_prop(ID2D1Effect *effect, UINT32 prop, int line)
+@@ -127,6 +130,15 @@ static UINT32 _effect_get_enum_prop(ID2D1Effect *effect, UINT32 prop, int line)
      return v;
  }
  
@@ -34,7 +35,7 @@ index 94aa4586184..a38b2b9e3af 100644
  #define effect_get_bool_prop(a,b) _effect_get_bool_prop(a,b,__LINE__)
  static UINT32 _effect_get_bool_prop(ID2D1Effect *effect, UINT32 prop, int line)
  {
-@@ -503,6 +514,10 @@ struct effect_impl
+@@ -503,6 +515,10 @@ struct effect_impl
          BYTE *data;
          ULONG size;
      } blob;
@@ -45,7 +46,7 @@ index 94aa4586184..a38b2b9e3af 100644
  
      const GUID *vertex_buffer;
      const GUID *vertex_shader;
-@@ -5866,7 +5881,6 @@ static void test_shared_bitmap(BOOL d3d11)
+@@ -5866,7 +5882,6 @@ static void test_shared_bitmap(BOOL d3d11)
  
      refcount = get_refcount(wic_lock);
      hr = ID2D1DeviceContext_CreateSharedBitmap(sw_device_context, &IID_IWICBitmapLock, wic_lock, NULL, &bitmap1);
@@ -53,7 +54,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      todo_wine
      ok(get_refcount(wic_lock) > refcount, "Unexpected refcount.\n");
-@@ -9683,7 +9697,7 @@ static void test_wic_gdi_interop(BOOL d3d11)
+@@ -9683,7 +9698,7 @@ static void test_wic_gdi_interop(BOOL d3d11)
  
      ID2D1RenderTarget_BeginDraw(rt);
      hr = IWICBitmap_Lock(wic_bitmap, NULL, WICBitmapLockRead, &wic_lock);
@@ -62,7 +63,7 @@ index 94aa4586184..a38b2b9e3af 100644
      if (SUCCEEDED(hr))
          IWICBitmapLock_Release(wic_lock);
      hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
-@@ -9694,7 +9708,7 @@ static void test_wic_gdi_interop(BOOL d3d11)
+@@ -9694,7 +9709,7 @@ static void test_wic_gdi_interop(BOOL d3d11)
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      ID2D1RenderTarget_BeginDraw(rt);
      hr = ID2D1RenderTarget_EndDraw(rt, NULL, NULL);
@@ -71,7 +72,7 @@ index 94aa4586184..a38b2b9e3af 100644
      IWICBitmapLock_Release(wic_lock);
  
      ID2D1GdiInteropRenderTarget_Release(interop);
-@@ -9745,6 +9759,414 @@ static void test_layer(BOOL d3d11)
+@@ -9745,6 +9760,414 @@ static void test_layer(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -486,7 +487,7 @@ index 94aa4586184..a38b2b9e3af 100644
  static void test_bezier_intersect(BOOL d3d11)
  {
      D2D1_POINT_2F point = {0.0f, 0.0f};
-@@ -10899,7 +11321,6 @@ static void test_command_list(BOOL d3d11)
+@@ -10899,7 +11322,6 @@ static void test_command_list(BOOL d3d11)
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      hr = ID2D1CommandList_Close(command_list);
@@ -494,7 +495,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      ID2D1CommandList_Release(command_list);
-@@ -12155,6 +12576,10 @@ static ULONG STDMETHODCALLTYPE effect_impl_Release(ID2D1EffectImpl *iface)
+@@ -12155,6 +12577,10 @@ static ULONG STDMETHODCALLTYPE effect_impl_Release(ID2D1EffectImpl *iface)
              ID2D1EffectContext_Release(effect_impl->effect_context);
          if (effect_impl->draw_info)
              ID2D1DrawInfo_Release(effect_impl->draw_info);
@@ -505,7 +506,7 @@ index 94aa4586184..a38b2b9e3af 100644
          free(effect_impl->blob.data);
          free(effect_impl);
      }
-@@ -13328,6 +13753,70 @@ struct effect_property
+@@ -13328,6 +13754,70 @@ struct effect_property
      D2D1_PROPERTY_TYPE type;
  };
  
@@ -576,7 +577,7 @@ index 94aa4586184..a38b2b9e3af 100644
  static void test_effect_2d_affine(BOOL d3d11)
  {
      static const struct effect_property properties[] =
-@@ -13492,7 +13981,6 @@ static void test_effect_2d_affine(BOOL d3d11)
+@@ -13492,7 +13982,6 @@ static void test_effect_2d_affine(BOOL d3d11)
          ID2D1Effect_GetOutput(effect, &output);
  
          hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -584,7 +585,7 @@ index 94aa4586184..a38b2b9e3af 100644
          ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
          todo_wine
          ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 1),
-@@ -13631,9 +14119,7 @@ static void test_effect_crop(BOOL d3d11)
+@@ -13631,9 +14120,7 @@ static void test_effect_crop(BOOL d3d11)
  
          set_rect(&output_bounds, -1.0f, -1.0f, -1.0f, -1.0f);
          hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -594,7 +595,7 @@ index 94aa4586184..a38b2b9e3af 100644
          ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 0),
                  "Got unexpected output bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
                  output_bounds.left, output_bounds.top, output_bounds.right, output_bounds.bottom,
-@@ -13716,7 +14202,7 @@ static void test_effect_grayscale(BOOL d3d11)
+@@ -13716,7 +14203,7 @@ static void test_effect_grayscale(BOOL d3d11)
                  + 0.587f * ((pixel >> 8) & 0xff)
                  + 0.114f * ((pixel >> 0) & 0xff) + 0.5f);
          expected_colour = (pixel & 0xff000000) | (luminance << 16) | (luminance << 8) | luminance;
@@ -603,7 +604,7 @@ index 94aa4586184..a38b2b9e3af 100644
                  "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
          release_resource_readback(&rb);
  
-@@ -13729,23 +14215,112 @@ static void test_effect_grayscale(BOOL d3d11)
+@@ -13729,23 +14216,112 @@ static void test_effect_grayscale(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -727,7 +728,7 @@ index 94aa4586184..a38b2b9e3af 100644
  
      if (!init_test_context(&ctx, d3d11))
          return;
-@@ -14087,9 +14662,7 @@ static void test_effect_flood(BOOL d3d11)
+@@ -14087,9 +14663,7 @@ static void test_effect_flood(BOOL d3d11)
      ID2D1Effect_GetOutput(effect, &output);
  
      hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
@@ -737,7 +738,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ok(compare_rect(&bounds, -bound, -bound, bound, bound, 0),
              "Got unexpected bounds {%.8e, %.8e, %.8e, %.8e}.\n",
              bounds.left, bounds.top, bounds.right, bounds.bottom);
-@@ -14110,7 +14683,6 @@ static void test_effect_flood(BOOL d3d11)
+@@ -14110,7 +14684,6 @@ static void test_effect_flood(BOOL d3d11)
      hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      match = compare_surface(&ctx, "6527ec83b4039c895b50f9b3e144fe0cf90d1889");
@@ -745,7 +746,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ok(match, "Surface does not match.\n");
  
      ID2D1Image_Release(output);
-@@ -14168,10 +14740,27 @@ static void test_effect_color_matrix(BOOL d3d11)
+@@ -14168,10 +14741,27 @@ static void test_effect_color_matrix(BOOL d3d11)
          { L"AlphaMode", D2D1_COLORMATRIX_PROP_ALPHA_MODE, D2D1_PROPERTY_TYPE_ENUM },
          { L"ClampOutput", D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT, D2D1_PROPERTY_TYPE_BOOL },
      };
@@ -774,7 +775,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ID2D1Effect *effect;
      WCHAR name[64];
      HRESULT hr;
-@@ -14208,6 +14797,36 @@ static void test_effect_color_matrix(BOOL d3d11)
+@@ -14208,6 +14798,36 @@ static void test_effect_color_matrix(BOOL d3d11)
      v = effect_get_bool_prop(effect, D2D1_COLORMATRIX_PROP_CLAMP_OUTPUT);
      ok(!v, "Unexpected value %#x.\n", v);
  
@@ -811,7 +812,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ID2D1Effect_Release(effect);
      release_test_context(&ctx);
  }
-@@ -14575,132 +15194,904 @@ static void test_effect_3d_transform(BOOL d3d11)
+@@ -14575,132 +15195,904 @@ static void test_effect_3d_transform(BOOL d3d11)
      release_test_context(&ctx);
  }
  
@@ -1793,7 +1794,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ID2D1TransformGraph *graph;
      ID2D1Factory1 *factory;
      POINT point = {0 ,0};
-@@ -15114,7 +16505,6 @@ static void test_border_transform(BOOL d3d11)
+@@ -15114,7 +16506,6 @@ static void test_border_transform(BOOL d3d11)
      todo_wine
      ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
      hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
@@ -1801,7 +1802,7 @@ index 94aa4586184..a38b2b9e3af 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      /* Set extend mode */
-@@ -16638,41 +18028,467 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
+@@ -16638,41 +18029,467 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
      ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
  }
  
@@ -2282,7 +2283,7 @@ index 94aa4586184..a38b2b9e3af 100644
      DWORD pixel;
      HRESULT hr;
  
-@@ -16680,1617 +18496,6139 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16680,1617 +18497,6323 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
          return;
  
      context = ctx.context;
@@ -4671,6 +4672,190 @@ index 94aa4586184..a38b2b9e3af 100644
 +    draw_effect_output(context, effect);
 +    check_prepare_calls(effect, 3, (D2D1_CHANGE_TYPE_GRAPH << 2 | D2D1_CHANGE_TYPE_PROPERTIES) << 2
 +            | D2D1_CHANGE_TYPE_PROPERTIES);
++
++    ID2D1Effect_Release(effect);
++    for (i = 0; i < ARRAY_SIZE(bitmap); ++i)
++        ID2D1Bitmap1_Release(bitmap[i]);
++    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    release_test_context(&ctx);
++}
++
++/* An effect that only puts a draw transform in its graph from
++ * PrepareForRender(), and puts it back each time it is asked. */
++static HRESULT STDMETHODCALLTYPE late_draw_effect_impl_Initialize(ID2D1EffectImpl *iface,
++        ID2D1EffectContext *context, ID2D1TransformGraph *graph)
++{
++    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
++
++    ID2D1EffectContext_AddRef(effect_impl->effect_context = context);
++    ID2D1TransformGraph_AddRef(effect_impl->transform_graph = graph);
++
++    return ID2D1TransformGraph_SetPassthroughGraph(graph, 0);
++}
++
++static HRESULT STDMETHODCALLTYPE late_draw_effect_impl_PrepareForRender(ID2D1EffectImpl *iface,
++        D2D1_CHANGE_TYPE type)
++{
++    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
++
++    ++effect_impl->prepare_count;
++    ID2D1TransformGraph_Clear(effect_impl->transform_graph);
++    return ID2D1TransformGraph_SetSingleTransformNode(effect_impl->transform_graph,
++            (ID2D1TransformNode *)&effect_impl->ID2D1DrawTransform_iface);
++}
++
++static const ID2D1EffectImplVtbl late_draw_effect_impl_vtbl =
++{
++    effect_impl_QueryInterface,
++    effect_impl_AddRef,
++    effect_impl_Release,
++    late_draw_effect_impl_Initialize,
++    late_draw_effect_impl_PrepareForRender,
++    effect_impl_SetGraph,
++};
++
++static HRESULT STDMETHODCALLTYPE late_draw_transform_SetDrawInfo(ID2D1DrawTransform *iface,
++        ID2D1DrawInfo *info)
++{
++    struct effect_impl *effect_impl = impl_from_ID2D1DrawTransform(iface);
++
++    ++effect_impl->graph_step;
++    return ID2D1DrawInfo_SetPixelShader(info, &GUID_TestGreenShader, 0);
++}
++
++static const ID2D1DrawTransformVtbl late_draw_transform_vtbl =
++{
++    effect_impl_draw_transform_QueryInterface,
++    effect_impl_draw_transform_AddRef,
++    effect_impl_draw_transform_Release,
++    effect_impl_draw_transform_GetInputCount,
++    effect_impl_draw_transform_MapOutputRectToInputRects,
++    effect_impl_draw_transform_MapInputRectsToOutputRect,
++    effect_impl_draw_transform_MapInvalidRect,
++    late_draw_transform_SetDrawInfo,
++};
++
++static struct effect_impl *late_draw_effect;
++
++static HRESULT STDMETHODCALLTYPE late_draw_effect_impl_create(IUnknown **effect_impl)
++{
++    struct effect_impl *object;
++
++    if (!(object = calloc(1, sizeof(*object))))
++        return E_OUTOFMEMORY;
++
++    object->ID2D1EffectImpl_iface.lpVtbl = &late_draw_effect_impl_vtbl;
++    object->ID2D1DrawTransform_iface.lpVtbl = &late_draw_transform_vtbl;
++    object->refcount = 1;
++    late_draw_effect = object;
++
++    *effect_impl = (IUnknown *)&object->ID2D1EffectImpl_iface;
++    return S_OK;
++}
++
++static void test_effect_prepare_for_render_draw_transform(BOOL d3d11)
++{
++    static const WCHAR *description =
++        L"<?xml version='1.0'?>                                                       \
++            <Effect>                                                                  \
++                <Property name='DisplayName' type='string' value='LateDraw'/>         \
++                <Property name='Author'      type='string' value='The Wine Project'/> \
++                <Property name='Category'    type='string' value='Test'/>             \
++                <Property name='Description' type='string' value='Test effect.'/>     \
++                <Inputs>                                                              \
++                    <Input name='Source'/>                                            \
++                </Inputs>                                                             \
++                <Property name='Integer' type='uint32'>                               \
++                    <Property name='DisplayName' type='string' value='Integer'/>      \
++                </Property>                                                           \
++            </Effect>                                                                 \
++        ";
++    static const char green_ps[] =
++        "float4 main() : sv_target\n"
++        "{\n"
++        "    return float4(0.0f, 1.0f, 0.0f, 1.0f);\n"
++        "}\n";
++    static const D2D1_PROPERTY_BINDING bindings[] =
++    {
++        {L"Integer", effect_impl_set_integer, effect_impl_get_integer},
++    };
++    static const DWORD red[2] = {0xffff0000, 0xff0000ff};
++
++    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
++    struct d2d1_test_context ctx;
++    struct resource_readback rb;
++    ID2D1DeviceContext *context;
++    ID2D1Factory1 *factory;
++    ID2D1Bitmap1 *bitmap[2];
++    ID2D1Effect *effect;
++    ID2D1Image *output;
++    D2D1_SIZE_U size;
++    unsigned int i;
++    DWORD colour;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    context = ctx.context;
++    if (!(factory = ctx.factory1))
++    {
++        win_skip("ID2D1Factory1 is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    preload_shader("ps_4_0", green_ps, &GUID_TestGreenShader, &ctx);
++
++    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, description,
++            bindings, ARRAY_SIZE(bindings), late_draw_effect_impl_create);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    set_size_u(&size, 1, 1);
++    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
++    bitmap_desc.dpiX = 96.0f;
++    bitmap_desc.dpiY = 96.0f;
++    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
++    bitmap_desc.colorContext = NULL;
++    for (i = 0; i < ARRAY_SIZE(bitmap); ++i)
++    {
++        hr = ID2D1DeviceContext_CreateBitmap(context, size, &red[i], sizeof(*red), &bitmap_desc, &bitmap[i]);
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    }
++    ok(!late_draw_effect->graph_step, "Got %u SetDrawInfo() calls.\n", late_draw_effect->graph_step);
++
++    /* The transform is given its draw info when it joins the graph, before
++     * the graph is drawn. A property change makes the effect rebuild its
++     * graph. */
++    for (i = 0; i < 2; ++i)
++    {
++        winetest_push_context("Draw %u", i);
++        ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap[i], TRUE);
++        hr = ID2D1Effect_SetValueByName(effect, L"Integer", D2D1_PROPERTY_TYPE_UINT32, (const BYTE *)&i, sizeof(i));
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++        ID2D1Effect_GetOutput(effect, &output);
++
++        ID2D1DeviceContext_BeginDraw(context);
++        ID2D1DeviceContext_Clear(context, 0);
++        ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
++        hr = ID2D1DeviceContext_EndDraw(context, NULL, NULL);
++        ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++        ID2D1Image_Release(output);
++
++        ok(late_draw_effect->graph_step == i + 1, "Got %u SetDrawInfo() calls.\n", late_draw_effect->graph_step);
++        ok(late_draw_effect->prepare_count == i + 1, "Got %u PrepareForRender() calls.\n",
++                late_draw_effect->prepare_count);
++
++        get_surface_readback(&ctx, &rb);
++        colour = get_readback_colour(&rb, 0, 0);
++        ok(compare_colour(colour, 0xff00ff00, 1), "Got unexpected colour 0x%08lx.\n", colour);
++        release_resource_readback(&rb);
++        winetest_pop_context();
++    }
 +
 +    ID2D1Effect_Release(effect);
 +    for (i = 0; i < ARRAY_SIZE(bitmap); ++i)
@@ -9565,7 +9750,7 @@ index 94aa4586184..a38b2b9e3af 100644
      release_test_context(&ctx);
  }
  
-@@ -18357,6 +24695,12 @@ START_TEST(d2d1)
+@@ -18357,6 +24880,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -9578,7 +9763,7 @@ index 94aa4586184..a38b2b9e3af 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18380,6 +24724,7 @@ START_TEST(d2d1)
+@@ -18380,6 +24909,7 @@ START_TEST(d2d1)
      queue_test(test_effect_2d_affine);
      queue_test(test_effect_crop);
      queue_test(test_effect_grayscale);
@@ -9586,7 +9771,7 @@ index 94aa4586184..a38b2b9e3af 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18397,8 +24742,12 @@ START_TEST(d2d1)
+@@ -18397,8 +24927,12 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_scale);
      queue_d3d10_test(test_effect_premultiply);
      queue_d3d10_test(test_effect_3d_transform);
@@ -9599,7 +9784,7 @@ index 94aa4586184..a38b2b9e3af 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,10 +24757,34 @@ START_TEST(d2d1)
+@@ -18408,10 +24942,35 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
@@ -9624,6 +9809,7 @@ index 94aa4586184..a38b2b9e3af 100644
 +    queue_test(test_effect_prepare_for_render_calls);
 +    queue_test(test_effect_command_list_input);
 +    queue_test(test_effect_scaled_draw);
++    queue_d3d10_test(test_effect_prepare_for_render_draw_transform);
      queue_d3d10_test(test_get_effect_properties);
      queue_test(test_effect_vertex_buffer);
      queue_d3d10_test(test_compute_geometry_area);

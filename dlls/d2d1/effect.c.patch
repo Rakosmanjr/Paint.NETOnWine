@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..1dcc762bbd0 100644
+index c298aeca93d..9168cdb0437 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -870,7 +870,7 @@ index c298aeca93d..1dcc762bbd0 100644
      </Inputs>                                                                \
      <Property name='InterpolationMode' type='enum' />                        \
      <Property name='BorderMode' type='enum' />                               \
-@@ -1277,645 +1759,2219 @@ static const D2D1_PROPERTY_BINDING crop_bindings[] =
+@@ -1277,297 +1759,1210 @@ static const D2D1_PROPERTY_BINDING crop_bindings[] =
      { L"BorderMode", BINDING_RW(crop, border_mode) },
  };
  
@@ -2274,12 +2274,14 @@ index c298aeca93d..1dcc762bbd0 100644
  }
  
  static const WCHAR blend_description[] =
- L"<?xml version='1.0'?>                                                   \
-   <Effect>                                                                \
--    <Property name='DisplayName' type='string' value='Blend'/>            \
-+    <Property name='DisplayName' type='string' value='Blend'/>            \
-+    <Property name='Author'      type='string' value='The Wine Project'/> \
-+    <Property name='Category'    type='string' value='Stub'/>             \
+@@ -1576,346 +2971,1007 @@ L"<?xml version='1.0'?>                                                   \
+     <Property name='DisplayName' type='string' value='Blend'/>            \
+     <Property name='Author'      type='string' value='The Wine Project'/> \
+     <Property name='Category'    type='string' value='Stub'/>             \
+-    <Property name='Description' type='string' value='Blend'/>            \
+-    <Inputs minimum='2' maximum='2' >                                     \
+-      <Input name='Source1'/>                                             \
+-      <Input name='Source2'/>                                             \
 +    <Property name='Description' type='string' value='Blend'/>            \
 +    <Inputs minimum='2' maximum='2' >                                     \
 +      <Input name='Source1'/>                                             \
@@ -2426,12 +2428,8 @@ index c298aeca93d..1dcc762bbd0 100644
 +L"<?xml version='1.0'?>                                                   \
 +  <Effect>                                                                \
 +    <Property name='DisplayName' type='string' value='Saturation'/>       \
-     <Property name='Author'      type='string' value='The Wine Project'/> \
-     <Property name='Category'    type='string' value='Stub'/>             \
--    <Property name='Description' type='string' value='Blend'/>            \
--    <Inputs minimum='2' maximum='2' >                                     \
--      <Input name='Source1'/>                                             \
--      <Input name='Source2'/>                                             \
++    <Property name='Author'      type='string' value='The Wine Project'/> \
++    <Property name='Category'    type='string' value='Stub'/>             \
 +    <Property name='Description' type='string' value='Saturation'/>       \
 +    <Inputs>                                                              \
 +      <Input name='Source'/>                                              \
@@ -3448,8 +3446,7 @@ index c298aeca93d..1dcc762bbd0 100644
 +    for (i = 0; i < 3; ++i)
 +        for (j = 0; j < 3; ++j)
 +            c->matrix[i][j] = m[i][j];
- 
--struct color_management_properties
++
 +    c->source_pq = source.pq;
 +    c->destination_pq = destination.pq;
 +    c->clamp_source = source.clamp;
@@ -3457,7 +3454,8 @@ index c298aeca93d..1dcc762bbd0 100644
 +    c->premultiplied = props->alpha_mode == D2D1_COLORMANAGEMENT_ALPHA_MODE_PREMULTIPLIED;
 +    color_management_set_curves(&c->source, &source);
 +    color_management_set_curves(&c->destination, &destination);
-+
+ 
+-struct color_management_properties
 +    return d2d_effect_impl_PrepareForRender(iface, type);
 +}
 +
@@ -3766,7 +3764,30 @@ index c298aeca93d..1dcc762bbd0 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
-@@ -3526,14 +5699,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3499,7 +5672,10 @@ static bool d2d_transform_node_needs_render_info(const struct d2d_transform_node
+     return false;
+ }
+ 
+-static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_graph *graph)
++/* A transform is given its render info each time it joins a graph, before
++ * the graph is drawn: after Initialize(), and after PrepareForRender() for
++ * whatever that added. */
++HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_graph *graph)
+ {
+     ID2D1DrawTransform *draw_transform;
+     struct d2d_transform_node *node;
+@@ -3507,6 +5683,10 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+ 
+     LIST_FOR_EACH_ENTRY(node, &graph->nodes, struct d2d_transform_node, entry)
+     {
++        if (node->initialised)
++            continue;
++        node->initialised = TRUE;
++
+         if (d2d_transform_node_needs_render_info(node))
+         {
+             if (FAILED(hr = d2d_effect_render_info_create(&node->render_info)))
+@@ -3526,14 +5706,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          }
          else
          {
@@ -3797,7 +3818,7 @@ index c298aeca93d..1dcc762bbd0 100644
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect)
  {
-@@ -3543,11 +5730,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3543,11 +5737,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -3895,7 +3916,7 @@ index c298aeca93d..1dcc762bbd0 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3564,6 +5836,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3564,6 +5843,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      object->ID2D1Image_iface.lpVtbl = &d2d_effect_image_vtbl;
      object->refcount = 1;
      object->effect_context = effect_context;
@@ -3903,7 +3924,7 @@ index c298aeca93d..1dcc762bbd0 100644
  
      /* Create properties */
      d2d_effect_duplicate_properties(object, &object->properties, reg->properties);
-@@ -3589,8 +5862,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3589,8 +5869,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -3920,7 +3941,7 @@ index c298aeca93d..1dcc762bbd0 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +5884,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +5891,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  
