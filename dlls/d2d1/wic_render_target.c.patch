@@ -1,39 +1,45 @@
 diff --git a/dlls/d2d1/wic_render_target.c b/dlls/d2d1/wic_render_target.c
-index c0720e69a8a..79b651de351 100644
+index c0720e69a8a..01a993fc7fb 100644
 --- a/dlls/d2d1/wic_render_target.c
 +++ b/dlls/d2d1/wic_render_target.c
-@@ -27,6 +27,53 @@ static inline struct d2d_wic_render_target *impl_from_IUnknown(IUnknown *iface)
+@@ -27,15 +27,65 @@ static inline struct d2d_wic_render_target *impl_from_IUnknown(IUnknown *iface)
      return CONTAINING_RECORD(iface, struct d2d_wic_render_target, IUnknown_iface);
  }
  
-+/* Drawing to a WIC bitmap target draws over what the bitmap holds, so its
-+ * current contents are what the texture starts from. */
++static HRESULT d2d_wic_render_target_lock(struct d2d_wic_render_target *render_target, IWICBitmapLock **lock)
++{
++    WICRect rect;
++
++    rect.X = 0;
++    rect.Y = 0;
++    rect.Width = render_target->width;
++    rect.Height = render_target->height;
++    return IWICBitmap_Lock(render_target->bitmap, &rect, WICBitmapLockWrite, lock);
++}
++
++/* The target holds the bitmap's lock from BeginDraw() to EndDraw(), and
++ * drawing to it draws over what the bitmap holds, so its contents when the
++ * draw begins are what the texture starts from. */
 +static void d2d_wic_render_target_begin_draw(IUnknown *outer_unknown)
 +{
 +    struct d2d_wic_render_target *render_target = impl_from_IUnknown(outer_unknown);
 +    ID3D10Resource *dst_resource;
-+    IWICBitmapLock *bitmap_lock;
 +    UINT src_size, src_pitch;
 +    ID3D10Device *device;
-+    WICRect src_rect;
 +    BYTE *src;
 +    HRESULT hr;
 +
-+    src_rect.X = 0;
-+    src_rect.Y = 0;
-+    src_rect.Width = render_target->width;
-+    src_rect.Height = render_target->height;
-+    if (FAILED(hr = IWICBitmap_Lock(render_target->bitmap, &src_rect, WICBitmapLockRead, &bitmap_lock)))
++    if (!render_target->lock && FAILED(hr = d2d_wic_render_target_lock(render_target, &render_target->lock)))
 +    {
-+        WARN("Failed to lock source bitmap, hr %#lx.\n", hr);
++        WARN("Failed to lock bitmap, hr %#lx.\n", hr);
++        render_target->lock = NULL;
 +        return;
 +    }
 +
-+    if (FAILED(hr = IWICBitmapLock_GetDataPointer(bitmap_lock, &src_size, &src))
-+            || FAILED(hr = IWICBitmapLock_GetStride(bitmap_lock, &src_pitch)))
++    if (FAILED(hr = IWICBitmapLock_GetDataPointer(render_target->lock, &src_size, &src))
++            || FAILED(hr = IWICBitmapLock_GetStride(render_target->lock, &src_pitch)))
 +    {
 +        WARN("Failed to get bitmap data, hr %#lx.\n", hr);
-+        IWICBitmapLock_Release(bitmap_lock);
 +        return;
 +    }
 +
@@ -49,22 +55,108 @@ index c0720e69a8a..79b651de351 100644
 +    {
 +        WARN("Failed to get destination resource interface, hr %#lx.\n", hr);
 +    }
-+
-+    IWICBitmapLock_Release(bitmap_lock);
 +}
 +
  static HRESULT d2d_wic_render_target_present(IUnknown *outer_unknown)
  {
      struct d2d_wic_render_target *render_target = impl_from_IUnknown(outer_unknown);
-@@ -146,6 +193,7 @@ static const struct IUnknownVtbl d2d_wic_render_target_vtbl =
+     D3D10_MAPPED_TEXTURE2D mapped_texture;
++    IWICBitmapLock *bitmap_lock = NULL;
+     ID3D10Resource *src_resource;
+-    IWICBitmapLock *bitmap_lock;
+     UINT dst_size, dst_pitch;
+     ID3D10Device *device;
+-    WICRect dst_rect;
+     BYTE *src, *dst;
+     unsigned int i;
+     HRESULT hr;
+@@ -52,34 +102,28 @@ static HRESULT d2d_wic_render_target_present(IUnknown *outer_unknown)
+     ID3D10Device_Release(device);
+     ID3D10Resource_Release(src_resource);
+ 
+-    dst_rect.X = 0;
+-    dst_rect.Y = 0;
+-    dst_rect.Width = render_target->width;
+-    dst_rect.Height = render_target->height;
+-    if (FAILED(hr = IWICBitmap_Lock(render_target->bitmap, &dst_rect, WICBitmapLockWrite, &bitmap_lock)))
++    if (!render_target->lock && FAILED(hr = d2d_wic_render_target_lock(render_target, &bitmap_lock)))
+     {
+-        ERR("Failed to lock destination bitmap, hr %#lx.\n", hr);
+-        goto end;
++        WARN("Failed to lock destination bitmap, hr %#lx.\n", hr);
++        return hr;
+     }
+ 
+-    if (FAILED(hr = IWICBitmapLock_GetDataPointer(bitmap_lock, &dst_size, &dst)))
++    if (FAILED(hr = IWICBitmapLock_GetDataPointer(render_target->lock ? render_target->lock : bitmap_lock,
++            &dst_size, &dst)))
+     {
+         ERR("Failed to get data pointer, hr %#lx.\n", hr);
+-        IWICBitmapLock_Release(bitmap_lock);
+         goto end;
+     }
+ 
+-    if (FAILED(hr = IWICBitmapLock_GetStride(bitmap_lock, &dst_pitch)))
++    if (FAILED(hr = IWICBitmapLock_GetStride(render_target->lock ? render_target->lock : bitmap_lock, &dst_pitch)))
+     {
+         ERR("Failed to get stride, hr %#lx.\n", hr);
+-        IWICBitmapLock_Release(bitmap_lock);
+         goto end;
+     }
+ 
+     if (FAILED(hr = ID3D10Texture2D_Map(render_target->readback_texture, 0, D3D10_MAP_READ, 0, &mapped_texture)))
+     {
+         ERR("Failed to map readback texture, hr %#lx.\n", hr);
+-        IWICBitmapLock_Release(bitmap_lock);
+         goto end;
+     }
+ 
+@@ -93,12 +137,24 @@ static HRESULT d2d_wic_render_target_present(IUnknown *outer_unknown)
+     }
+ 
+     ID3D10Texture2D_Unmap(render_target->readback_texture, 0);
+-    IWICBitmapLock_Release(bitmap_lock);
+ 
+ end:
++    if (bitmap_lock)
++        IWICBitmapLock_Release(bitmap_lock);
+     return S_OK;
+ }
+ 
++static void d2d_wic_render_target_end_draw(IUnknown *outer_unknown)
++{
++    struct d2d_wic_render_target *render_target = impl_from_IUnknown(outer_unknown);
++
++    if (render_target->lock)
++    {
++        IWICBitmapLock_Release(render_target->lock);
++        render_target->lock = NULL;
++    }
++}
++
+ static HRESULT STDMETHODCALLTYPE d2d_wic_render_target_QueryInterface(IUnknown *iface, REFIID iid, void **out)
+ {
+     struct d2d_wic_render_target *render_target = impl_from_IUnknown(iface);
+@@ -127,6 +183,8 @@ static ULONG STDMETHODCALLTYPE d2d_wic_render_target_Release(IUnknown *iface)
+ 
+     if (!refcount)
+     {
++        if (render_target->lock)
++            IWICBitmapLock_Release(render_target->lock);
+         IWICBitmap_Release(render_target->bitmap);
+         ID3D10Texture2D_Release(render_target->readback_texture);
+         IUnknown_Release(render_target->dxgi_inner);
+@@ -146,7 +204,9 @@ static const struct IUnknownVtbl d2d_wic_render_target_vtbl =
  
  static const struct d2d_device_context_ops d2d_wic_render_target_ops =
  {
 +    d2d_wic_render_target_begin_draw,
      d2d_wic_render_target_present,
++    d2d_wic_render_target_end_draw,
  };
  
-@@ -227,6 +275,9 @@ HRESULT d2d_wic_render_target_init(struct d2d_wic_render_target *render_target,
+ static HRESULT d2d_wic_resolve_pixel_format(D2D1_PIXEL_FORMAT *pixel_format,
+@@ -227,6 +287,9 @@ HRESULT d2d_wic_render_target_init(struct d2d_wic_render_target *render_target,
          case DXGI_FORMAT_R8G8B8A8_UNORM:
              render_target->bpp = 4;
              break;

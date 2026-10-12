@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/d2d1_private.h b/dlls/d2d1/d2d1_private.h
-index ba6cea78e06..8ce92e2c632 100644
+index ba6cea78e06..ac6596d708e 100644
 --- a/dlls/d2d1/d2d1_private.h
 +++ b/dlls/d2d1/d2d1_private.h
 @@ -23,6 +23,7 @@
@@ -129,15 +129,17 @@ index ba6cea78e06..8ce92e2c632 100644
  
  struct d2d_vs_cb
  {
-@@ -143,6 +222,7 @@ struct d2d_vs_cb
+@@ -143,7 +222,9 @@ struct d2d_vs_cb
  
  struct d2d_device_context_ops
  {
 +    void (*device_context_begin_draw)(IUnknown *outer_unknown);
      HRESULT (*device_context_present)(IUnknown *outer_unknown);
++    void (*device_context_end_draw)(IUnknown *outer_unknown);
  };
  
-@@ -170,6 +250,38 @@ struct d2d_indexed_objects
+ enum d2d_device_context_sampler_limits
+@@ -170,6 +251,38 @@ struct d2d_indexed_objects
      size_t count;
  };
  
@@ -176,7 +178,15 @@ index ba6cea78e06..8ce92e2c632 100644
  struct d2d_device_context
  {
      ID2D1DeviceContext6 ID2D1DeviceContext6_iface;
-@@ -198,6 +310,12 @@ struct d2d_device_context
+@@ -180,6 +293,7 @@ struct d2d_device_context
+ 
+     IUnknown *outer_unknown;
+     const struct d2d_device_context_ops *ops;
++    BOOL in_draw;
+ 
+     ID2D1Factory *factory;
+     CRITICAL_SECTION *cs;
+@@ -198,6 +312,12 @@ struct d2d_device_context
          HDC hdc;
      } target;
      struct d2d_shape_resources shape_resources[D2D_SHAPE_TYPE_COUNT];
@@ -189,7 +199,7 @@ index ba6cea78e06..8ce92e2c632 100644
      ID3D11Buffer *vs_cb;
      ID3D11PixelShader *ps;
      ID3D11Buffer *ps_cb;
-@@ -206,6 +324,12 @@ struct d2d_device_context
+@@ -206,6 +326,12 @@ struct d2d_device_context
      ID3D11Buffer *vb;
      ID3D11RasterizerState *rs;
      ID3D11BlendState *bs;
@@ -202,7 +212,7 @@ index ba6cea78e06..8ce92e2c632 100644
      ID3D11SamplerState *sampler_states
              [D2D_SAMPLER_INTERPOLATION_MODE_COUNT]
              [D2D_SAMPLER_EXTEND_MODE_COUNT]
-@@ -219,8 +343,21 @@ struct d2d_device_context
+@@ -219,8 +345,21 @@ struct d2d_device_context
      D2D1_RENDER_TARGET_PROPERTIES desc;
      D2D1_SIZE_U pixel_size;
      struct d2d_clip_stack clip_stack;
@@ -224,7 +234,15 @@ index ba6cea78e06..8ce92e2c632 100644
  };
  
  HRESULT d2d_d3d_create_render_target(struct d2d_device *device, IDXGISurface *surface, IUnknown *outer_unknown,
-@@ -432,6 +569,7 @@ struct d2d_mesh
+@@ -242,6 +381,7 @@ struct d2d_wic_render_target
+     IUnknown *dxgi_inner;
+     ID3D10Texture2D *readback_texture;
+     IWICBitmap *bitmap;
++    IWICBitmapLock *lock;
+ 
+     unsigned int width;
+     unsigned int height;
+@@ -432,6 +572,7 @@ struct d2d_mesh
  };
  
  HRESULT d2d_mesh_create(ID2D1Factory *factory, struct d2d_mesh **mesh);
@@ -232,7 +250,7 @@ index ba6cea78e06..8ce92e2c632 100644
  
  struct d2d_bitmap
  {
-@@ -443,6 +581,9 @@ struct d2d_bitmap
+@@ -443,6 +584,9 @@ struct d2d_bitmap
      ID3D11RenderTargetView *rtv;
      IDXGISurface *surface;
      ID3D11Resource *resource;
@@ -242,7 +260,7 @@ index ba6cea78e06..8ce92e2c632 100644
      D3D11_MAPPED_SUBRESOURCE mapped_resource;
      D2D1_SIZE_U pixel_size;
      D2D1_PIXEL_FORMAT format;
-@@ -451,10 +592,13 @@ struct d2d_bitmap
+@@ -451,10 +595,13 @@ struct d2d_bitmap
      D2D1_BITMAP_OPTIONS options;
  };
  
@@ -256,7 +274,7 @@ index ba6cea78e06..8ce92e2c632 100644
  HRESULT d2d_bitmap_create_from_wic_bitmap(struct d2d_device_context *context, IWICBitmapSource *bitmap_source,
          const D2D1_BITMAP_PROPERTIES1 *desc, struct d2d_bitmap **bitmap);
  unsigned int d2d_get_bitmap_options_for_surface(IDXGISurface *surface);
-@@ -679,6 +823,7 @@ struct d2d_device
+@@ -679,6 +826,7 @@ struct d2d_device
      ID2D1Factory1 *factory;
      IDXGIDevice *dxgi_device;
      bool allow_get_dxgi_device;
@@ -264,7 +282,7 @@ index ba6cea78e06..8ce92e2c632 100644
  
      ID3D10Blob *precompiled_shape_vs[D2D_SHAPE_TYPE_COUNT];
      ID3D10Blob *precompiled_shape_ps;
-@@ -803,12 +948,17 @@ struct d2d_transform
+@@ -803,12 +951,17 @@ struct d2d_transform
          D2D1_RECT_L bounds;
      };
  
@@ -282,7 +300,7 @@ index ba6cea78e06..8ce92e2c632 100644
  };
  
  struct d2d_render_info
-@@ -818,6 +968,8 @@ struct d2d_render_info
+@@ -818,6 +971,8 @@ struct d2d_render_info
  
      unsigned int mask;
      GUID pixel_shader;
@@ -291,7 +309,7 @@ index ba6cea78e06..8ce92e2c632 100644
  };
  
  struct d2d_transform_node
-@@ -825,23 +977,26 @@ struct d2d_transform_node
+@@ -825,23 +980,26 @@ struct d2d_transform_node
      struct list entry;
      ID2D1TransformNode *object;
      struct d2d_render_info *render_info;
@@ -324,7 +342,7 @@ index ba6cea78e06..8ce92e2c632 100644
      unsigned int input_count;
  
      struct d2d_transform_node *output;
-@@ -858,17 +1013,32 @@ struct d2d_effect
+@@ -858,17 +1016,32 @@ struct d2d_effect
      ID2D1Image ID2D1Image_iface;
      LONG refcount;
  
@@ -357,7 +375,7 @@ index ba6cea78e06..8ce92e2c632 100644
  void d2d_effect_init_properties(struct d2d_effect *effect, struct d2d_effect_properties *properties);
  HRESULT d2d_effect_properties_add(struct d2d_effect_properties *props, const WCHAR *name,
          UINT32 index, D2D1_PROPERTY_TYPE type, const WCHAR *value);
-@@ -911,6 +1081,16 @@ struct d2d_command_list
+@@ -911,6 +1084,16 @@ struct d2d_command_list
      size_t objects_count;
      size_t objects_capacity;
      IUnknown **objects;
@@ -374,7 +392,7 @@ index ba6cea78e06..8ce92e2c632 100644
  };
  
  HRESULT d2d_command_list_create(ID2D1Factory *factory, struct d2d_command_list **command_list);
-@@ -954,8 +1134,8 @@ void d2d_command_list_draw_bitmap(struct d2d_command_list *command_list, ID2D1Bi
+@@ -954,8 +1137,8 @@ void d2d_command_list_draw_bitmap(struct d2d_command_list *command_list, ID2D1Bi
  void d2d_command_list_draw_sprite_batch(struct d2d_command_list *command_list, ID2D1SpriteBatch *sprite_batch,
          UINT32 start_index, UINT32 sprite_count, ID2D1Bitmap *bitmap, D2D1_BITMAP_INTERPOLATION_MODE interpolation_mode,
          D2D1_SPRITE_OPTIONS sprite_options);
@@ -385,7 +403,7 @@ index ba6cea78e06..8ce92e2c632 100644
          D2D1_COMPOSITE_MODE composite_mode);
  void d2d_command_list_fill_mesh(struct d2d_command_list *command_list, const struct d2d_device_context *context,
          ID2D1Mesh *mesh, ID2D1Brush *orig_brush);
-@@ -964,6 +1144,9 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
+@@ -964,6 +1147,9 @@ void d2d_command_list_fill_opacity_mask(struct d2d_command_list *command_list, c
  void d2d_command_list_push_layer(struct d2d_command_list *command_list, const struct d2d_device_context *context,
          const D2D1_LAYER_PARAMETERS1 *params);
  void d2d_command_list_pop_layer(struct d2d_command_list *command_list);
@@ -395,7 +413,7 @@ index ba6cea78e06..8ce92e2c632 100644
  
  static inline BOOL d2d_array_reserve(void **elements, size_t *capacity, size_t count, size_t size)
  {
-@@ -1031,6 +1214,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
+@@ -1031,6 +1217,20 @@ static inline float d2d_point_dot(const D2D1_POINT_2F *p0, const D2D1_POINT_2F *
      return p0->x * p1->x + p0->y * p1->y;
  }
  
@@ -416,7 +434,7 @@ index ba6cea78e06..8ce92e2c632 100644
  static inline void d2d_point_transform(D2D1_POINT_2F *dst, const D2D1_MATRIX_3X2_F *matrix, float x, float y)
  {
      dst->x = x * matrix->_11 + y * matrix->_21 + matrix->_31;
-@@ -1049,6 +1246,88 @@ static inline void d2d_rect_expand(D2D1_RECT_F *dst, const D2D1_POINT_2F *point)
+@@ -1049,6 +1249,88 @@ static inline void d2d_rect_expand(D2D1_RECT_F *dst, const D2D1_POINT_2F *point)
          dst->bottom = point->y;
  }
  
@@ -505,7 +523,7 @@ index ba6cea78e06..8ce92e2c632 100644
  static inline D2D1_INTERPOLATION_MODE d2d1_1_interp_mode_from_d2d1(D2D1_BITMAP_INTERPOLATION_MODE mode)
  {
      return (D2D1_INTERPOLATION_MODE)mode;
-@@ -1082,6 +1361,13 @@ static inline const char *debug_d2d_point_2u(const D2D1_POINT_2U *point)
+@@ -1082,6 +1364,13 @@ static inline const char *debug_d2d_point_2u(const D2D1_POINT_2U *point)
      return wine_dbg_sprintf("{%u, %u}", point->x, point->y);
  }
  
@@ -519,7 +537,7 @@ index ba6cea78e06..8ce92e2c632 100644
  static inline const char *debug_d2d_rect_f(const D2D1_RECT_F *rect)
  {
      if (!rect)
-@@ -1119,4 +1405,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
+@@ -1119,4 +1408,21 @@ static inline const char *debug_d2d_ellipse(const D2D1_ELLIPSE *ellipse)
              ellipse->point.x, ellipse->point.y, ellipse->radiusX, ellipse->radiusY);
  }
  
