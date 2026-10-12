@@ -1,8 +1,8 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index d406fecca18..8452cba48a5 100644
+index 94aa4586184..0b2d457c81b 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
-@@ -5857,7 +5857,6 @@ static void test_shared_bitmap(BOOL d3d11)
+@@ -5866,7 +5866,6 @@ static void test_shared_bitmap(BOOL d3d11)
  
      refcount = get_refcount(wic_lock);
      hr = ID2D1DeviceContext_CreateSharedBitmap(sw_device_context, &IID_IWICBitmapLock, wic_lock, NULL, &bitmap1);
@@ -10,7 +10,7 @@ index d406fecca18..8452cba48a5 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      todo_wine
      ok(get_refcount(wic_lock) > refcount, "Unexpected refcount.\n");
-@@ -10890,7 +10889,6 @@ static void test_command_list(BOOL d3d11)
+@@ -10899,7 +10898,6 @@ static void test_command_list(BOOL d3d11)
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      hr = ID2D1CommandList_Close(command_list);
@@ -18,7 +18,7 @@ index d406fecca18..8452cba48a5 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      ID2D1CommandList_Release(command_list);
-@@ -13483,7 +13481,6 @@ static void test_effect_2d_affine(BOOL d3d11)
+@@ -13492,7 +13490,6 @@ static void test_effect_2d_affine(BOOL d3d11)
          ID2D1Effect_GetOutput(effect, &output);
  
          hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -26,7 +26,7 @@ index d406fecca18..8452cba48a5 100644
          ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
          todo_wine
          ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 1),
-@@ -13622,9 +13619,7 @@ static void test_effect_crop(BOOL d3d11)
+@@ -13631,9 +13628,7 @@ static void test_effect_crop(BOOL d3d11)
  
          set_rect(&output_bounds, -1.0f, -1.0f, -1.0f, -1.0f);
          hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &output_bounds);
@@ -36,7 +36,7 @@ index d406fecca18..8452cba48a5 100644
          ok(compare_rect(&output_bounds, test->bounds.left, test->bounds.top, test->bounds.right, test->bounds.bottom, 0),
                  "Got unexpected output bounds {%.8e, %.8e, %.8e, %.8e}, expected {%.8e, %.8e, %.8e, %.8e}.\n",
                  output_bounds.left, output_bounds.top, output_bounds.right, output_bounds.bottom,
-@@ -13707,7 +13702,7 @@ static void test_effect_grayscale(BOOL d3d11)
+@@ -13716,7 +13711,7 @@ static void test_effect_grayscale(BOOL d3d11)
                  + 0.587f * ((pixel >> 8) & 0xff)
                  + 0.114f * ((pixel >> 0) & 0xff) + 0.5f);
          expected_colour = (pixel & 0xff000000) | (luminance << 16) | (luminance << 8) | luminance;
@@ -45,7 +45,7 @@ index d406fecca18..8452cba48a5 100644
                  "Got unexpected colour %#lx, expected %#lx.\n", colour, expected_colour);
          release_resource_readback(&rb);
  
-@@ -14078,7 +14073,6 @@ static void test_effect_flood(BOOL d3d11)
+@@ -14087,7 +14082,6 @@ static void test_effect_flood(BOOL d3d11)
      ID2D1Effect_GetOutput(effect, &output);
  
      hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
@@ -53,7 +53,7 @@ index d406fecca18..8452cba48a5 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
      todo_wine
      ok(compare_rect(&bounds, -bound, -bound, bound, bound, 0),
-@@ -14968,7 +14962,6 @@ static void test_border_transform(BOOL d3d11)
+@@ -15114,7 +15108,6 @@ static void test_border_transform(BOOL d3d11)
      todo_wine
      ok(hr == E_INVALIDARG, "Got unexpected hr %#lx.\n", hr);
      hr = ID2D1BorderTransform_SetOutputBuffer(transform, D2D1_BUFFER_PRECISION_UNKNOWN, D2D1_CHANNEL_DEPTH_DEFAULT);
@@ -61,7 +61,7 @@ index d406fecca18..8452cba48a5 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      /* Set extend mode */
-@@ -16577,7 +16570,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
+@@ -16723,7 +16716,7 @@ static void test_effect_custom_pixel_shader(BOOL d3d11)
      get_surface_readback(&ctx, &rb);
      colour = get_readback_colour(&rb, 0, 0);
      expected_colour = 0x661a334c;

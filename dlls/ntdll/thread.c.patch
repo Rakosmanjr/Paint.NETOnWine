@@ -1,8 +1,8 @@
 diff --git a/dlls/ntdll/thread.c b/dlls/ntdll/thread.c
-index fe083befbca..cea6ea798f9 100644
+index 1c25c8ff1d5..386a6ad70d0 100644
 --- a/dlls/ntdll/thread.c
 +++ b/dlls/ntdll/thread.c
-@@ -154,6 +154,7 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
+@@ -156,6 +156,7 @@ int __cdecl __wine_dbg_header( enum __wine_debug_class cls, struct __wine_debug_
      }
      if (TRACE_ON(pid)) pos += sprintf( pos, "%04lx:", GetCurrentProcessId() );
      pos += sprintf( pos, "%04lx:", GetCurrentThreadId() );
