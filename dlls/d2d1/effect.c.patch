@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/effect.c b/dlls/d2d1/effect.c
-index c298aeca93d..7a302ccdaa8 100644
+index c298aeca93d..1dcc762bbd0 100644
 --- a/dlls/d2d1/effect.c
 +++ b/dlls/d2d1/effect.c
 @@ -17,6 +17,8 @@
@@ -3441,15 +3441,15 @@ index c298aeca93d..7a302ccdaa8 100644
 -  </Effect>";
 +    if ((source.best_only || destination.best_only) && props->quality != D2D1_COLORMANAGEMENT_QUALITY_BEST)
 +        return E_INVALIDARG;
- 
--struct color_management_properties
++
 +    if (!colour_matrix_invert(xyz_to_rgb, destination.rgb_to_xyz))
 +        return E_INVALIDARG;
 +    colour_matrix_multiply(m, xyz_to_rgb, source.rgb_to_xyz);
 +    for (i = 0; i < 3; ++i)
 +        for (j = 0; j < 3; ++j)
 +            c->matrix[i][j] = m[i][j];
-+
+ 
+-struct color_management_properties
 +    c->source_pq = source.pq;
 +    c->destination_pq = destination.pq;
 +    c->clamp_source = source.clamp;
@@ -3677,16 +3677,25 @@ index c298aeca93d..7a302ccdaa8 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_effect_context_CreateBlendTransform(ID2D1EffectContext *iface,
-@@ -2740,6 +4881,8 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
+@@ -2737,9 +4878,17 @@ static void d2d_effect_cleanup(struct d2d_effect *effect)
+     }
+     free(effect->inputs);
+     ID2D1EffectContext_Release(&effect->effect_context->ID2D1EffectContext_iface);
++    /* The implementation may hold the graph, and the graph its transforms,
++     * which may be the implementation itself; emptying the graph breaks
++     * that cycle. */
      if (effect->graph)
++    {
++        d2d_transform_graph_clear(effect->graph);
          ID2D1TransformGraph_Release(&effect->graph->ID2D1TransformGraph_iface);
++    }
      d2d_effect_properties_cleanup(&effect->properties);
 +    if (effect->effect_impl)
 +        ID2D1EffectImpl_Release(effect->effect_impl);
      if (effect->impl)
          ID2D1EffectImpl_Release(effect->impl);
  }
-@@ -2968,7 +5111,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
+@@ -2968,7 +5117,7 @@ static HRESULT d2d_effect_set_input_count(struct d2d_effect *effect, UINT32 coun
  
          if (SUCCEEDED(hr = d2d_transform_graph_create(count, &effect->graph)))
          {
@@ -3695,7 +3704,7 @@ index c298aeca93d..7a302ccdaa8 100644
                  WARN("Failed to set a new transform graph, hr %#lx.\n", hr);
          }
      }
-@@ -3366,7 +5509,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
+@@ -3366,7 +5515,10 @@ static ULONG STDMETHODCALLTYPE d2d_draw_info_Release(ID2D1DrawInfo *iface)
      TRACE("iface %p refcount %lu.\n", iface, refcount);
  
      if (!refcount)
@@ -3706,7 +3715,7 @@ index c298aeca93d..7a302ccdaa8 100644
  
      return refcount;
  }
-@@ -3376,7 +5522,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
+@@ -3376,7 +5528,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetInputDescription(ID2D1DrawInfo
  {
      FIXME("iface %p, index %u stub.\n", iface, index);
  
@@ -3715,7 +3724,7 @@ index c298aeca93d..7a302ccdaa8 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *iface,
-@@ -3384,7 +5530,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
+@@ -3384,7 +5536,7 @@ static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetOutputBuffer(ID2D1DrawInfo *if
  {
      FIXME("iface %p, precision %u, depth %u stub.\n", iface, precision, depth);
  
@@ -3724,7 +3733,7 @@ index c298aeca93d..7a302ccdaa8 100644
  }
  
  static void STDMETHODCALLTYPE d2d_draw_info_SetCached(ID2D1DrawInfo *iface, BOOL is_cached)
-@@ -3401,9 +5547,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
+@@ -3401,9 +5553,30 @@ static void STDMETHODCALLTYPE d2d_draw_info_SetInstructionCountHint(ID2D1DrawInf
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetPixelShaderConstantBuffer(ID2D1DrawInfo *iface,
          const BYTE *buffer, UINT32 size)
  {
@@ -3757,7 +3766,7 @@ index c298aeca93d..7a302ccdaa8 100644
  }
  
  static HRESULT STDMETHODCALLTYPE d2d_draw_info_SetResourceTexture(ID2D1DrawInfo *iface,
-@@ -3526,14 +5693,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
+@@ -3526,14 +5699,28 @@ static HRESULT d2d_effect_transform_graph_initialize_nodes(struct d2d_transform_
          }
          else
          {
@@ -3788,7 +3797,7 @@ index c298aeca93d..7a302ccdaa8 100644
  HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effect_id,
          ID2D1Effect **effect)
  {
-@@ -3543,11 +5724,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3543,11 +5730,96 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      UINT32 input_count;
      WCHAR clsidW[39];
      HRESULT hr;
@@ -3886,7 +3895,7 @@ index c298aeca93d..7a302ccdaa8 100644
      }
  
      if (!(effect_context = calloc(1, sizeof(*effect_context))))
-@@ -3564,6 +5830,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3564,6 +5836,7 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
      object->ID2D1Image_iface.lpVtbl = &d2d_effect_image_vtbl;
      object->refcount = 1;
      object->effect_context = effect_context;
@@ -3894,7 +3903,7 @@ index c298aeca93d..7a302ccdaa8 100644
  
      /* Create properties */
      d2d_effect_duplicate_properties(object, &object->properties, reg->properties);
-@@ -3589,8 +5856,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3589,8 +5862,14 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          ID2D1Effect_Release(&object->ID2D1Effect_iface);
          return hr;
      }
@@ -3911,7 +3920,7 @@ index c298aeca93d..7a302ccdaa8 100644
              &object->graph->ID2D1TransformGraph_iface)))
      {
          WARN("Failed to initialize effect, hr %#lx.\n", hr);
-@@ -3605,6 +5878,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
+@@ -3605,6 +5884,10 @@ HRESULT d2d_effect_create(struct d2d_device_context *context, const CLSID *effec
          return hr;
      }
  
