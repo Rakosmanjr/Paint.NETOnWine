@@ -1,5 +1,5 @@
 diff --git a/dlls/d2d1/tests/d2d1.c b/dlls/d2d1/tests/d2d1.c
-index 94aa4586184..6ce8f6c451f 100644
+index 94aa4586184..7f884e420c9 100644
 --- a/dlls/d2d1/tests/d2d1.c
 +++ b/dlls/d2d1/tests/d2d1.c
 @@ -18,6 +18,7 @@
@@ -2457,7 +2457,7 @@ index 94aa4586184..6ce8f6c451f 100644
      ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
  
      /* Set extend mode */
-@@ -16638,1659 +18295,6972 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
+@@ -16638,1659 +18295,7159 @@ static void preload_shader(const char *target, const char *code, const GUID *id,
      ok(hr == S_OK, "Unexpected hr %#lx.\n", hr);
  }
  
@@ -5237,6 +5237,193 @@ index 94aa4586184..6ce8f6c451f 100644
 +    ID2D1Effect_Release(effect);
 +    for (i = 0; i < ARRAY_SIZE(bitmap); ++i)
 +        ID2D1Bitmap1_Release(bitmap[i]);
++    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    release_test_context(&ctx);
++}
++
++/* PrepareForRender() returns the value of "Integer". */
++static HRESULT STDMETHODCALLTYPE failing_effect_impl_PrepareForRender(ID2D1EffectImpl *iface,
++        D2D1_CHANGE_TYPE type)
++{
++    struct effect_impl *effect_impl = impl_from_ID2D1EffectImpl(iface);
++
++    ++effect_impl->prepare_count;
++    effect_impl->prepare_history = effect_impl->prepare_history << 2 | type;
++    return effect_impl->integer;
++}
++
++static const ID2D1EffectImplVtbl failing_effect_impl_vtbl =
++{
++    effect_impl_QueryInterface,
++    effect_impl_AddRef,
++    effect_impl_Release,
++    regraph_effect_impl_Initialize,
++    failing_effect_impl_PrepareForRender,
++    effect_impl_SetGraph,
++};
++
++static HRESULT STDMETHODCALLTYPE failing_effect_impl_create(IUnknown **effect_impl)
++{
++    struct effect_impl *object;
++
++    if (!(object = calloc(1, sizeof(*object))))
++        return E_OUTOFMEMORY;
++
++    object->ID2D1EffectImpl_iface.lpVtbl = &failing_effect_impl_vtbl;
++    object->refcount = 1;
++    object->integer = 0x8000dead;
++
++    *effect_impl = (IUnknown *)&object->ID2D1EffectImpl_iface;
++    return S_OK;
++}
++
++static void test_effect_prepare_for_render_failure(BOOL d3d11)
++{
++    static const WCHAR *description =
++        L"<?xml version='1.0'?>                                                       \
++            <Effect>                                                                  \
++                <Property name='DisplayName' type='string' value='Failing'/>          \
++                <Property name='Author'      type='string' value='The Wine Project'/> \
++                <Property name='Category'    type='string' value='Test'/>             \
++                <Property name='Description' type='string' value='Test effect.'/>     \
++                <Inputs>                                                              \
++                    <Input name='Source'/>                                            \
++                </Inputs>                                                             \
++                <Property name='Integer' type='uint32'>                               \
++                    <Property name='DisplayName' type='string' value='Integer'/>      \
++                </Property>                                                           \
++                <Property name='Count' type='uint32'>                                 \
++                    <Property name='DisplayName' type='string' value='Count'/>        \
++                </Property>                                                           \
++                <Property name='History' type='uint32'>                               \
++                    <Property name='DisplayName' type='string' value='History'/>      \
++                </Property>                                                           \
++            </Effect>                                                                 \
++        ";
++    static const DWORD input_colour = 0xff00ff00;
++    const D2D1_PROPERTY_BINDING bindings[] =
++    {
++        {L"Integer", effect_impl_set_integer, counting_effect_impl_get_integer},
++        {L"Count",   NULL, counting_effect_impl_get_count},
++        {L"History", NULL, counting_effect_impl_get_history},
++    };
++    D2D1_BITMAP_PROPERTIES1 bitmap_desc;
++    struct d2d1_test_context ctx;
++    struct resource_readback rb;
++    ID2D1SolidColorBrush *brush;
++    ID2D1DeviceContext *context;
++    D2D1_TAG tag1, tag2;
++    ID2D1Factory1 *factory;
++    ID2D1Bitmap1 *bitmap;
++    ID2D1Effect *effect;
++    ID2D1Image *output;
++    D2D1_RECT_F bounds;
++    D2D1_COLOR_F color;
++    D2D1_SIZE_U size;
++    DWORD colour;
++    UINT32 value;
++    HRESULT hr;
++
++    if (!init_test_context(&ctx, d3d11))
++        return;
++
++    context = ctx.context;
++    if (!(factory = ctx.factory1))
++    {
++        win_skip("ID2D1Factory1 is not supported.\n");
++        release_test_context(&ctx);
++        return;
++    }
++
++    hr = ID2D1Factory1_RegisterEffectFromString(factory, &CLSID_TestEffect, description,
++            bindings, ARRAY_SIZE(bindings), failing_effect_impl_create);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    set_size_u(&size, 1, 1);
++    bitmap_desc.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
++    bitmap_desc.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
++    bitmap_desc.dpiX = 96.0f;
++    bitmap_desc.dpiY = 96.0f;
++    bitmap_desc.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
++    bitmap_desc.colorContext = NULL;
++    hr = ID2D1DeviceContext_CreateBitmap(context, size, &input_colour, sizeof(input_colour), &bitmap_desc, &bitmap);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    set_color(&color, 0.0f, 0.0f, 1.0f, 1.0f);
++    hr = ID2D1DeviceContext_CreateSolidColorBrush(context, &color, NULL, &brush);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++
++    hr = ID2D1DeviceContext_CreateEffect(context, &CLSID_TestEffect, &effect);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1Effect_SetInput(effect, 0, (ID2D1Image *)bitmap, FALSE);
++    ID2D1Effect_GetOutput(effect, &output);
++
++    /* The failure is returned from EndDraw(), with the tags current when the
++     * image was drawn, and drawing after it is dropped. */
++    ID2D1DeviceContext_BeginDraw(context);
++    set_color(&color, 1.0f, 0.0f, 0.0f, 1.0f);
++    ID2D1DeviceContext_Clear(context, &color);
++    hr = ID2D1DeviceContext_Flush(context, NULL, NULL);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ID2D1DeviceContext_SetTags(context, 1, 2);
++    ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
++    ID2D1DeviceContext_SetTags(context, 3, 4);
++    set_rect(&bounds, 0.0f, 0.0f, 4.0f, 4.0f);
++    ID2D1DeviceContext_FillRectangle(context, &bounds, (ID2D1Brush *)brush);
++    tag1 = tag2 = 0xdead;
++    hr = ID2D1DeviceContext_EndDraw(context, &tag1, &tag2);
++    todo_wine ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
++    todo_wine ok(tag1 == 1 && tag2 == 2, "Got unexpected tags %s:%s.\n",
++            wine_dbgstr_longlong(tag1), wine_dbgstr_longlong(tag2));
++    check_prepare_calls(effect, 1, D2D1_CHANGE_TYPE_GRAPH);
++    get_surface_readback(&ctx, &rb);
++    colour = get_readback_colour(&rb, 0, 0);
++    todo_wine ok(compare_colour(colour, 0xffff0000, 1), "Got unexpected colour 0x%08lx.\n", colour);
++    release_resource_readback(&rb);
++
++    /* The change stays pending, so the next draw asks again. Flush() reports
++     * the failure and clears it. */
++    ID2D1DeviceContext_BeginDraw(context);
++    ID2D1DeviceContext_SetTags(context, 1, 2);
++    ID2D1DeviceContext_DrawImage(context, output, NULL, NULL, 0, 0);
++    ID2D1DeviceContext_SetTags(context, 3, 4);
++    tag1 = tag2 = 0xdead;
++    hr = ID2D1DeviceContext_Flush(context, &tag1, &tag2);
++    todo_wine ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
++    todo_wine ok(tag1 == 1 && tag2 == 2, "Got unexpected tags %s:%s.\n",
++            wine_dbgstr_longlong(tag1), wine_dbgstr_longlong(tag2));
++    ID2D1DeviceContext_FillRectangle(context, &bounds, (ID2D1Brush *)brush);
++    tag1 = tag2 = 0xdead;
++    hr = ID2D1DeviceContext_EndDraw(context, &tag1, &tag2);
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    ok(!tag1 && !tag2, "Got unexpected tags %s:%s.\n", wine_dbgstr_longlong(tag1), wine_dbgstr_longlong(tag2));
++    check_prepare_calls(effect, 2, D2D1_CHANGE_TYPE_GRAPH << 2 | D2D1_CHANGE_TYPE_GRAPH);
++    get_surface_readback(&ctx, &rb);
++    colour = get_readback_colour(&rb, 0, 0);
++    ok(compare_colour(colour, 0xff0000ff, 1), "Got unexpected colour 0x%08lx.\n", colour);
++    release_resource_readback(&rb);
++
++    /* Measuring the image reports the failure too. */
++    hr = ID2D1DeviceContext_GetImageLocalBounds(context, output, &bounds);
++    todo_wine ok(hr == 0x8000dead, "Got unexpected hr %#lx.\n", hr);
++    check_prepare_calls(effect, 3, (D2D1_CHANGE_TYPE_GRAPH << 2 | D2D1_CHANGE_TYPE_GRAPH) << 2
++            | D2D1_CHANGE_TYPE_GRAPH);
++
++    /* A change made after a failed call adds to the one still pending. */
++    value = S_OK;
++    hr = ID2D1Effect_SetValueByName(effect, L"Integer", D2D1_PROPERTY_TYPE_UINT32, (BYTE *)&value, sizeof(value));
++    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
++    draw_effect_output(context, effect);
++    check_prepare_calls(effect, 4, 0xff);
++    get_surface_readback(&ctx, &rb);
++    colour = get_readback_colour(&rb, 0, 0);
++    ok(compare_colour(colour, input_colour, 1), "Got unexpected colour 0x%08lx.\n", colour);
++    release_resource_readback(&rb);
++
++    ID2D1Image_Release(output);
++    ID2D1Effect_Release(effect);
++    ID2D1SolidColorBrush_Release(brush);
++    ID2D1Bitmap1_Release(bitmap);
 +    hr = ID2D1Factory1_UnregisterEffect(factory, &CLSID_TestEffect);
 +    ok(hr == S_OK, "Got unexpected hr %#lx.\n", hr);
 +    release_test_context(&ctx);
@@ -10618,7 +10805,7 @@ index 94aa4586184..6ce8f6c451f 100644
      release_test_context(&ctx);
  }
  
-@@ -18357,6 +25327,12 @@ START_TEST(d2d1)
+@@ -18357,6 +25514,12 @@ START_TEST(d2d1)
      queue_test(test_fill_geometry);
      queue_test(test_wic_gdi_interop);
      queue_test(test_layer);
@@ -10631,7 +10818,7 @@ index 94aa4586184..6ce8f6c451f 100644
      queue_test(test_bezier_intersect);
      queue_test(test_create_device);
      queue_test(test_create_device_context);
-@@ -18374,12 +25350,14 @@ START_TEST(d2d1)
+@@ -18374,12 +25537,14 @@ START_TEST(d2d1)
      queue_d3d10_test(test_geometry_group);
      queue_test(test_mt_factory);
      queue_d3d10_test(test_effect_register);
@@ -10646,7 +10833,7 @@ index 94aa4586184..6ce8f6c451f 100644
      queue_d3d10_test(test_registered_effects);
      queue_d3d10_test(test_effect_gaussian_blur);
      queue_d3d10_test(test_effect_point_specular);
-@@ -18397,8 +25375,12 @@ START_TEST(d2d1)
+@@ -18397,8 +25562,12 @@ START_TEST(d2d1)
      queue_d3d10_test(test_effect_scale);
      queue_d3d10_test(test_effect_premultiply);
      queue_d3d10_test(test_effect_3d_transform);
@@ -10659,7 +10846,7 @@ index 94aa4586184..6ce8f6c451f 100644
      queue_test(test_offset_transform);
      queue_test(test_blend_transform);
      queue_test(test_border_transform);
-@@ -18408,10 +25390,36 @@ START_TEST(d2d1)
+@@ -18408,10 +25577,37 @@ START_TEST(d2d1)
      queue_test(test_bitmap_map);
      queue_test(test_bitmap_create);
      queue_test(test_effect_custom_pixel_shader);
@@ -10682,6 +10869,7 @@ index 94aa4586184..6ce8f6c451f 100644
 +    queue_test(test_rendering_controls);
 +    queue_test(test_effect_prepare_for_render_graph);
 +    queue_test(test_effect_prepare_for_render_calls);
++    queue_test(test_effect_prepare_for_render_failure);
 +    queue_test(test_effect_command_list_input);
 +    queue_test(test_effect_scaled_draw);
 +    queue_d3d10_test(test_effect_prepare_for_render_draw_transform);
